@@ -1,0 +1,86 @@
+"""Path-confined file tools for a single AgentForge run.
+
+This is defense in depth, not an OS sandbox. Run untrusted generated code in an isolated
+container or VM before using AgentForge for anything beyond local experimentation.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path, PureWindowsPath
+
+from agentforge.config import Settings
+
+
+class WorkspaceError(ValueError):
+    """A file request violates the workspace policy."""
+
+
+class Workspace:
+    def __init__(self, root: Path, *, max_file_bytes: int | None = None) -> None:
+        self.root = root.expanduser().resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.max_file_bytes = max_file_bytes if max_file_bytes is not None else Settings.from_env().max_file_bytes
+
+    def resolve(self, relative_path: str) -> Path:
+        if not relative_path or not relative_path.strip():
+            raise WorkspaceError("Path cannot be empty")
+        posix_path = Path(relative_path)
+        windows_path = PureWindowsPath(relative_path)
+        if posix_path.is_absolute() or posix_path.drive or windows_path.is_absolute() or windows_path.drive:
+            raise WorkspaceError("Absolute paths are not allowed")
+        normalized = relative_path.replace("\\", "/")
+        if ".." in normalized.split("/"):
+            raise WorkspaceError("Parent-directory traversal is not allowed")
+        target = (self.root / normalized).resolve()
+        try:
+            target.relative_to(self.root)
+        except ValueError as exc:
+            raise WorkspaceError("Path resolves outside the run workspace") from exc
+        return target
+
+    def read_text(self, relative_path: str) -> str:
+        target = self.resolve(relative_path)
+        if not target.is_file():
+            raise WorkspaceError(f"File does not exist: {relative_path}")
+        if target.stat().st_size > self.max_file_bytes:
+            raise WorkspaceError("File exceeds the configured size limit")
+        return target.read_text(encoding="utf-8")
+
+    def write_text(self, relative_path: str, content: str) -> str:
+        target = self.resolve(relative_path)
+        payload = content.encode("utf-8")
+        if len(payload) > self.max_file_bytes:
+            raise WorkspaceError("File exceeds the configured size limit")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.is_symlink():
+            raise WorkspaceError("Writing through a symbolic link is not allowed")
+        target.write_text(content, encoding="utf-8", newline="\n")
+        return f"Wrote {relative_path} ({len(payload)} bytes)"
+
+    def list_files(self, relative_path: str = ".") -> list[str]:
+        base = self.root if relative_path == "." else self.resolve(relative_path)
+        if not base.is_dir():
+            raise WorkspaceError(f"Directory does not exist: {relative_path}")
+        found: list[str] = []
+        for item in base.rglob("*"):
+            try:
+                item.resolve().relative_to(self.root)
+            except (ValueError, OSError):
+                continue
+            if item.is_file():
+                found.append(item.relative_to(self.root).as_posix())
+            if len(found) >= 1000:
+                found.append("[listing truncated at 1000 files]")
+                break
+        return sorted(found)
+
+    def snapshot(self) -> dict[str, int]:
+        snapshot: dict[str, int] = {}
+        for relative in self.list_files():
+            if relative.startswith("["):
+                continue
+            try:
+                snapshot[relative] = self.resolve(relative).stat().st_size
+            except OSError:
+                continue
+        return snapshot
