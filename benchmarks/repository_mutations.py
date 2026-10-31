@@ -100,6 +100,8 @@ async def run(model: str | None, output: Path, selected_case: str | None = None)
             )
             item["repair"] = {
                 "status": report.status, "run_id": report.run_id,
+                "error": report.error,
+                "validation": report.validation.model_dump(mode="json"),
                 "artifacts": report.artifacts, "changed_files":
                     report.attempts[-1]["changed_files"] if report.attempts else [],
             }
@@ -108,6 +110,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None)
         print(json.dumps({
             "name": case.name, "baseline": baseline_check.status, "mutant": mutant_check.status,
             "repair": item.get("repair", {}).get("status", "not run"),
+            "error": item.get("repair", {}).get("error"),
         }), flush=True)
     return 0 if all(
         item["baseline"]["status"] == "verified"
