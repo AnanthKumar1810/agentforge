@@ -46,3 +46,19 @@ def test_bounded_read_search_and_exact_replacement(tmp_path: Path) -> None:
         ws.read_lines("src/module.py", 1, 201)
     (ws.root / ".env").write_text("SECRET=example")
     assert "SECRET" not in ws.search_files("SECRET")
+
+
+def test_replace_line_preserves_indent_and_protects_tests(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "workspace")
+    ws.write_text("sample.py", "def result():\n    return 0\n")
+    ws.replace_line("sample.py", 2, "return 2")
+    assert ws.read_text("sample.py") == "def result():\n    return 2\n"
+    with pytest.raises(WorkspaceError, match="outside"):
+        ws.replace_line("sample.py", 0, "return 3")
+    with pytest.raises(WorkspaceError, match="one nonempty"):
+        ws.replace_line("sample.py", 2, "return 3\nreturn 4")
+    (ws.root / "tests").mkdir()
+    (ws.root / "tests" / "test_sample.py").write_text("assert True\n")
+    with pytest.raises(WorkspaceError, match="Protected"):
+        ws.replace_line("tests/test_sample.py", 1, "assert False")
+

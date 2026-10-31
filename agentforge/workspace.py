@@ -86,6 +86,19 @@ class Workspace:
             raise WorkspaceError("Replacement source must occur exactly once")
         return self.write_text(relative_path, content.replace(old, new, 1))
 
+    def replace_line(self, relative_path: str, line: int, new: str) -> str:
+        """Replace one numbered source line; preserve indentation for unindented input."""
+        if not isinstance(line, int) or isinstance(line, bool) or not isinstance(new, str) or not new.strip() or "\n" in new or "\r" in new:
+            raise WorkspaceError("Replacement requires a line number and one nonempty line")
+        current = self.read_text(relative_path).splitlines(keepends=True)
+        if line < 1 or line > len(current):
+            raise WorkspaceError("Replacement line is outside the file")
+        old = current[line - 1]
+        indentation = old[:len(old) - len(old.lstrip())]
+        replacement = new if new[:1].isspace() else indentation + new
+        current[line - 1] = replacement + ("\n" if old.endswith("\n") else "")
+        return self.write_text(relative_path, "".join(current))
+
     def write_text(self, relative_path: str, content: str) -> str:
         target = self.resolve(relative_path)
         parts = target.relative_to(self.root).parts
@@ -140,3 +153,4 @@ class Workspace:
             except OSError:
                 continue
         return snapshot
+

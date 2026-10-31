@@ -32,16 +32,17 @@ CASES = (
         "return min(max(x, lower), upper)", "return max(min(x, lower), upper)",
         "Fix the regression in boltons/mathutils.py clamp(): values inside and outside the "
         "lower/upper bounds should behave as the maintained tests specify. First search "
-        "for def clamp in that file, read the nearby lines, and make one minimal "
-        "replace_text change. Do not edit tests.",
+        "for the return statement in that file; use the search result's line number "
+        "with replace_line to correct that line. Do not edit tests.",
     ),
     Case(
         "more-itertools-take", "https://github.com/more-itertools/more-itertools.git",
         "08dca284ba5446a026afdc34067b658f9da989eb", "more_itertools/recipes.py",
         "return list(islice(iterable, n))", "return list(islice(iterable, n + 1))",
         "Fix the off-by-one regression in more_itertools/recipes.py take(). Its maintained "
-        "tests specify the correct number of items. First search for def take in that file, "
-        "read the nearby lines, and make one minimal replace_text change. Do not edit tests.",
+        "tests specify the correct number of items. Search for islice(iterable in that file "
+        "and use the search result's line number with replace_line to correct the "
+        "return line. Do not edit tests.",
     ),
 )
 

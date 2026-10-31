@@ -21,7 +21,7 @@ AgentCall = Callable[..., Awaitable[str]]
 
 SUPERVISOR = "Convert the user request into a concise engineering plan, assumptions, acceptance criteria, likely files, and tests. Do not claim to edit files."
 DEVELOPER = (
-    "Implement the task only with read_file, read_lines, search_files, write_file, replace_text, and list_files. Use relative paths; "
+    "Implement the task only with read_file, read_lines, search_files, write_file, replace_text, replace_line, and list_files. Use relative paths; "
     "never attempt shell, network, credential, or outside-workspace access. Write complete, "
     "testable files and summarize changes and remaining risks."
 )
@@ -148,3 +148,4 @@ class AgentForgeEngine:
         )
         report.artifacts = write_reports(report, output_dir)
         return report
+

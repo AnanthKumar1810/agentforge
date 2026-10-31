@@ -16,10 +16,13 @@ and time limits apply. The GitHub runners are disposable.
 The passing upstream and failing mutant suites were recorded by [this Docker
 preflight run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41211198361).
 The first live Ollama attempts exhausted the Developer's eight file-tool turns
-without making a change; that is a model workflow failure, not a successful
-repair. The later workflow uses a 16 turn bound and saves error details for
-diagnosis. Check the newest `pinned-repository-benchmark` GitHub Actions run
-and its per-case `ollama-repair-*` artifacts for current live outcomes.
+without making a change. A 16 turn run showed repeated successful searches
+and reads on More Itertools, and exact-match replacement failures on Boltons;
+neither was a successful repair. A new `replace_line` tool and focused prompts
+now address those observed issues. Check the newest `pinned-repository-benchmark`
+GitHub Actions run and its per-case `ollama-repair-*` artifacts for current
+live outcomes. These requests identify the affected function and suggest a
+numbered-line edit, so passing them would show guided repair, not blind diagnosis.
 
 Reproduce on a Docker host with the validator image and a local Ollama model:
 
