@@ -82,3 +82,29 @@ def test_ollama_exact_replacement_tool(tmp_path, monkeypatch):
                                    tools=[Workspace(tmp_path)], provider="ollama"))
     assert result == "Fixed."
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_ollama_can_edit_after_eight_reads(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    calls = 0
+
+    def chat(endpoint, payload):
+        nonlocal calls
+        calls += 1
+        if calls <= 9:
+            return {"message": {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "search_files", "arguments": {"query": "value", "path": "sample.py"}}}
+            ]}}
+        if calls == 10:
+            return {"message": {"role": "assistant", "content": "", "tool_calls": [
+                {"function": {"name": "replace_text", "arguments": {
+                    "path": "sample.py", "old": "value = 0", "new": "value = 2"}}}
+            ]}}
+        return {"message": {"role": "assistant", "content": "Fixed."}}
+
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                 provider="ollama")) == "Fixed."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+

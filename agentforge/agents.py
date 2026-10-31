@@ -133,7 +133,8 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                             {"role": "user", "content": prompt}]
     workspace = tools[0] if tools and isinstance(tools[0], Workspace) else None
     applied_writes: set[tuple[str, str]] = set()
-    for _ in range(8):
+    tool_trace: list[str] = []
+    for _ in range(16):
         payload = {"model": model, "messages": messages, "stream": False,
                    "options": {"temperature": 0.1, "num_predict": 1200}}
         if workspace is not None:
@@ -165,6 +166,9 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     args = json.loads(args)
                 except json.JSONDecodeError:
                     args = {}
+            if not isinstance(args, dict):
+                args = {}
+            tool_trace.append(f"{name}({str(args.get('path', ''))[:80]})")
             try:
                 if name == "read_file":
                     result = workspace.read_text(args["path"])
@@ -198,4 +202,6 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             messages.append({"role": "tool", "tool_name": name, "content": result[:500_000]})
     if applied_writes:
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
-    raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files")
+    raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files; "
+                       "tool trace: " + ", ".join(tool_trace[:32]))
+
