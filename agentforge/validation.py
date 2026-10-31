@@ -59,7 +59,7 @@ def _docker_command(root: Path, arguments: list[str]) -> tuple[list[str], str]:
     return ([
         "docker", "run", "--rm", "--pull=never", "--name", name,
         "--network=none", "--read-only", "--cap-drop=ALL",
-        "--security-opt=no-new-privileges", "--pids-limit=64", "--memory=512m", "--cpus=1",
+        "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=512m", "--cpus=1",
         "--user=65534:65534", "--tmpfs=/tmp:rw,nosuid,size=64m",
         "--mount", f"type=bind,source={root},target=/workspace,readonly",
         "--workdir=/workspace", "--env=PYTHONPATH=/workspace",
