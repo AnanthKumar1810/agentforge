@@ -33,12 +33,26 @@ class Settings:
     validation_timeout_seconds: int
     max_file_bytes: int
     beeai_model: str
+    provider: str = "openai"
+    ollama_base_url: str = "http://127.0.0.1:11434/v1/"
+    validator: str = "docker"
 
     @classmethod
     def from_env(cls) -> "Settings":
-        model = os.getenv("AGENTFORGE_MODEL", "gpt-5-mini").strip()
+        provider = os.getenv("AGENTFORGE_PROVIDER", "openai").strip().lower()
+        model = os.getenv("AGENTFORGE_MODEL", "qwen3:8b" if provider == "ollama" else "gpt-5-mini").strip()
         if not model:
             raise ValueError("AGENTFORGE_MODEL cannot be empty")
+        if provider not in {"openai", "ollama"}:
+            raise ValueError("AGENTFORGE_PROVIDER must be openai or ollama")
+        base_url = os.getenv("AGENTFORGE_OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1/").strip()
+        from urllib.parse import urlsplit
+        endpoint = urlsplit(base_url)
+        if endpoint.scheme != "http" or endpoint.hostname not in {"localhost", "127.0.0.1", "::1"} or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path.rstrip("/") != "/v1":
+            raise ValueError("Ollama endpoint must be a local http://localhost:port/v1/ URL")
+        validator = os.getenv("AGENTFORGE_VALIDATOR", "docker").strip().lower()
+        if validator not in {"local", "docker"}:
+            raise ValueError("AGENTFORGE_VALIDATOR must be local or docker")
         return cls(
             model=model,
             data_dir=Path(os.getenv("AGENTFORGE_DATA_DIR", ".agentforge-data")).expanduser(),
@@ -48,6 +62,9 @@ class Settings:
             ),
             max_file_bytes=_int_env("AGENTFORGE_MAX_FILE_BYTES", 500_000, 1),
             beeai_model=os.getenv("AGENTFORGE_BEEAI_MODEL", "ollama:granite4.1:8b").strip(),
+            provider=provider,
+            ollama_base_url=base_url,
+            validator=validator,
         )
 
 

@@ -14,6 +14,10 @@ def make_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     build = sub.add_parser("build", help="run the agent workflow")
     build.add_argument("request")
+    build.add_argument("--source-repo", help="local repository path")
+    build.add_argument("--test-manifest", help="JSON test selection manifest")
+    build.add_argument("--generate-tests", action="store_true")
+    build.add_argument("--allow-local-execution", action="store_true", help="run repository checks; use only with trusted code or OS isolation")
     build.add_argument("--crewai", action="store_true")
     build.add_argument("--beeai", action="store_true")
     build.add_argument("--max-repair-rounds", type=int, choices=range(0, 6))
@@ -27,7 +31,7 @@ def make_parser() -> argparse.ArgumentParser:
 
 
 async def run_build(args: argparse.Namespace) -> int:
-    report = await AgentForgeEngine().run(args.request, use_crewai=args.crewai, use_beeai=args.beeai, max_repair_rounds=args.max_repair_rounds)
+    report = await AgentForgeEngine().run(args.request, use_crewai=args.crewai, use_beeai=args.beeai, max_repair_rounds=args.max_repair_rounds, source_repo=args.source_repo, test_manifest=args.test_manifest, generate_tests=args.generate_tests, allow_local_execution=args.allow_local_execution)
     print(json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False))
     return 0 if report.status == "passed" else 1
 

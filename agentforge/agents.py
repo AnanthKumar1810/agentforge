@@ -1,7 +1,11 @@
 """OpenAI Agents SDK adapter and workspace-scoped Developer tools."""
 
 from __future__ import annotations
+import asyncio
+import json
 from typing import Any
+from urllib.request import Request, build_opener, ProxyHandler
+from urllib.parse import urlsplit
 
 from agentforge.config import require_openai_key
 from agentforge.workspace import Workspace, WorkspaceError
@@ -42,9 +46,13 @@ def build_workspace_tools(workspace: Workspace) -> list[Any]:
 
 async def run_agent(
     name: str, instructions: str, prompt: str, *, tools: list[Any] | None = None,
-    model: str = "gpt-5-mini",
+    model: str = "gpt-5-mini", provider: str = "openai",
+    ollama_base_url: str = "http://127.0.0.1:11434/v1/",
 ) -> str:
-    require_openai_key()
+    if provider == "ollama":
+        return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url)
+    if provider == "openai":
+        require_openai_key()
     try:
         from agents import Agent, Runner
     except ImportError as exc:
@@ -53,3 +61,95 @@ async def run_agent(
     result = await Runner.run(agent, prompt)
     output = getattr(result, "final_output", None)
     return output if isinstance(output, str) else str(output if output is not None else result)
+
+
+_OLLAMA_TOOLS = [
+    {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 workspace file.",
+      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
+    {"type": "function", "function": {"name": "write_file", "description": "Create or replace a workspace file.",
+      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                     "required": ["path", "content"]}}},
+    {"type": "function", "function": {"name": "list_files", "description": "List workspace files.",
+      "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+]
+
+
+def _ollama_chat(endpoint: str, payload: dict) -> dict:
+    request = Request(endpoint, data=json.dumps(payload).encode("utf-8"),
+                      headers={"Content-Type": "application/json"})
+    # The configured endpoint is validated as localhost by Settings.
+    with build_opener(ProxyHandler({})).open(request, timeout=180) as response:
+        return json.load(response)
+
+
+async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
+                            model: str, base_url: str) -> str:
+    endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
+    parsed = urlsplit(endpoint)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat":
+        raise ValueError("Ollama endpoint must be local")
+    if tools:
+        instructions += ("\nWhen using a file tool, send a native tool call. If your model cannot send one, "
+                         "respond with ONLY a JSON object such as "
+                         '{"name":"write_file","arguments":{"path":"sample.py","content":"..."}}. '
+                         "Wait for the tool result before claiming a change.")
+    messages: list[dict] = [{"role": "system", "content": instructions},
+                            {"role": "user", "content": prompt}]
+    workspace = tools[0] if tools and isinstance(tools[0], Workspace) else None
+    applied_writes: set[tuple[str, str]] = set()
+    for _ in range(8):
+        payload = {"model": model, "messages": messages, "stream": False,
+                   "options": {"temperature": 0.1, "num_predict": 1200}}
+        if workspace is not None:
+            payload["tools"] = _OLLAMA_TOOLS
+        response = await asyncio.to_thread(_ollama_chat, endpoint, payload)
+        message = response.get("message", {})
+        calls = message.get("tool_calls") or []
+        if not calls and workspace is not None:
+            content = str(message.get("content", "")).strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+            try:
+                candidate = json.loads(content)
+                if isinstance(candidate, dict) and candidate.get("name") in {"read_file", "write_file", "list_files"}:
+                    calls = [{"function": candidate}]
+            except json.JSONDecodeError:
+                pass
+        if not calls:
+            return str(message.get("content", ""))
+        if workspace is None:
+            raise RuntimeError("Ollama requested tools for an agent without a workspace")
+        messages.append(message)
+        for call in calls:
+            function = call.get("function", {})
+            name = function.get("name")
+            args = function.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            try:
+                if name == "read_file":
+                    result = workspace.read_text(args["path"])
+                elif name == "write_file":
+                    fingerprint = (args["path"], args["content"])
+                    if fingerprint in applied_writes:
+                        return "Repeated write suppressed; the change was applied in the workspace."
+                    try:
+                        if workspace.read_text(args["path"]).strip() == args["content"].strip():
+                            return "Equivalent write suppressed; the change is already in the workspace."
+                    except WorkspaceError:
+                        pass
+                    result = workspace.write_text(args["path"], args["content"])
+                    applied_writes.add(fingerprint)
+                elif name == "list_files":
+                    result = "\n".join(workspace.list_files(args.get("path", ".")))
+                else:
+                    result = "ERROR: Unknown tool"
+            except (WorkspaceError, OSError, UnicodeError, KeyError, TypeError) as exc:
+                result = f"ERROR: {exc}"
+            messages.append({"role": "tool", "tool_name": name, "content": result[:500_000]})
+    if applied_writes:
+        return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
+    raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files")

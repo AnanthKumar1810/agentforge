@@ -15,6 +15,9 @@ class WorkspaceError(ValueError):
     """A file request violates the workspace policy."""
 
 
+PROTECTED_FILES = {"conftest.py", "pytest.ini", "tox.ini", "test_manifest.json",
+                   "pyproject.toml", "setup.cfg", "setup.py", "sitecustomize.py", "usercustomize.py"}
+
 class Workspace:
     def __init__(self, root: Path, *, max_file_bytes: int | None = None) -> None:
         self.root = root.expanduser().resolve()
@@ -40,6 +43,8 @@ class Workspace:
 
     def read_text(self, relative_path: str) -> str:
         target = self.resolve(relative_path)
+        if self._sensitive(target):
+            raise WorkspaceError("Credential path cannot be read by the agent")
         if not target.is_file():
             raise WorkspaceError(f"File does not exist: {relative_path}")
         if target.stat().st_size > self.max_file_bytes:
@@ -48,6 +53,14 @@ class Workspace:
 
     def write_text(self, relative_path: str, content: str) -> str:
         target = self.resolve(relative_path)
+        parts = target.relative_to(self.root).parts
+        name = target.name.lower()
+        if (any(part.lower() in {"tests", ".git", ".github", ".venv"} for part in parts)
+                or self._sensitive(target) or name in PROTECTED_FILES
+                or name.startswith("requirements") and name.endswith(".txt")
+                or name.startswith("test_") and name.endswith(".py")
+                or name.endswith("_test.py")):
+            raise WorkspaceError("Protected test, configuration, or credential path cannot be edited by the agent")
         payload = content.encode("utf-8")
         if len(payload) > self.max_file_bytes:
             raise WorkspaceError("File exceeds the configured size limit")
@@ -56,6 +69,14 @@ class Workspace:
             raise WorkspaceError("Writing through a symbolic link is not allowed")
         target.write_text(content, encoding="utf-8", newline="\n")
         return f"Wrote {relative_path} ({len(payload)} bytes)"
+
+    def _sensitive(self, target: Path) -> bool:
+        parts = target.relative_to(self.root).parts
+        name = target.name.lower()
+        return (any(part.lower() in {".aws", ".ssh"} for part in parts)
+                or name.startswith(".env") or name.endswith((".pem", ".key"))
+                or name in {".npmrc", ".pypirc", "credentials.json"}
+                or name.startswith(("id_rsa", "id_ed25519")))
 
     def list_files(self, relative_path: str = ".") -> list[str]:
         base = self.root if relative_path == "." else self.resolve(relative_path)

@@ -20,18 +20,21 @@ class ValidationSummary(BaseModel):
     checks: list[ValidationCheck] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)
     duration_seconds: float = 0.0
+    status: Literal["verified", "syntax_only", "failed"] = "failed"
+    selected_tests: list[str] = Field(default_factory=list)
 
 
 class RunReport(BaseModel):
     run_id: str
     request: str
-    status: Literal["passed", "failed", "error"]
+    status: Literal["passed", "unverified", "failed", "error"]
     started_at: datetime
     finished_at: datetime
     workspace: str
     plan: str = ""
     optional_context: dict[str, str] = Field(default_factory=dict)
     validation: ValidationSummary
+    attempts: list[dict[str, Any]] = Field(default_factory=list)
     repair_rounds: int = 0
     tester_notes: list[str] = Field(default_factory=list)
     review: str = ""

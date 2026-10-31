@@ -10,7 +10,7 @@ A user submits a software task. AgentForge:
 2. optionally asks a CrewAI planning crew for architecture/QA planning;
 3. optionally asks a BeeAI specialist for implementation risks and research notes;
 4. gives the plan to a Developer agent with workspace tools;
-5. runs deterministic syntax/tests in a controlled subprocess;
+5. runs deterministic syntax/tests when explicitly enabled for trusted or isolated code;
 6. asks a Tester agent to interpret failures;
 7. gives failures back to the Developer for bounded repair rounds;
 8. asks a Reviewer agent for a final code review;
@@ -20,8 +20,8 @@ The same engine can be invoked through:
 
 - CLI;
 - FastAPI;
-- an A2A 1.0-compatible server;
-- MCP v2 workspace tools.
+- a prototype A2A-style facade;
+- an optional MCP server.
 
 ## Architecture
 
@@ -72,7 +72,9 @@ copy .env.example .env  # Windows
 # cp .env.example .env  # Linux/macOS
 ```
 
-Add your API key to `.env`.
+For a local model, start Ollama and choose an installed model such as `qwen2.5-coder:7b` in `.env`. The Ollama adapter calls the local API directly and handles both native tool calls and strict JSON tool requests. Hosted OpenAI requires `OPENAI_API_KEY`.
+
+Docker validation is the default and fails closed if Docker or the validator image is unavailable. Build the image with `docker build -t agentforge-validator:py313 validator`. Use `AGENTFORGE_VALIDATOR=local` only with a trusted fixture or repository.
 
 ## Run from CLI
 
@@ -80,10 +82,13 @@ Add your API key to `.env`.
 agentforge build "Build a FastAPI todo API with tests and a README"
 ```
 
+By default, the result is `unverified`: generated code is not executed. For a repository you trust, or inside a disposable OS/container sandbox, add `--allow-local-execution` to run syntax checks and pytest. A passing syntax check without tests is still `unverified`.
+
 Useful options:
 
 ```bash
 agentforge build "Build a calculator" --crewai --beeai
+agentforge build "Fix the value function" --source-repo C:\path\to\repo --allow-local-execution
 ```
 
 `--beeai` expects whatever provider/model is configured in `AGENTFORGE_BEEAI_MODEL`; the supplied example uses local Ollama.
@@ -94,7 +99,7 @@ agentforge build "Build a calculator" --crewai --beeai
 uvicorn agentforge.api:app --host 127.0.0.1 --port 8000
 ```
 
-Then POST to `/runs`:
+Set a long random `AGENTFORGE_API_TOKEN`. Send `Authorization: Bearer <token>` to POST `/runs` or GET `/runs/{run_id}`. A POST body is:
 
 ```json
 {
@@ -110,7 +115,7 @@ Then POST to `/runs`:
 python -m agentforge.protocols.a2a_server
 ```
 
-The public Agent Card is exposed by the A2A SDK at the standard well-known path. The server delegates an incoming A2A task to the complete AgentForge engine.
+This is a prototype A2A-style facade. Client conformance and authentication have not been established; keep it bound to localhost.
 
 ## Run the MCP server
 
@@ -118,7 +123,7 @@ The public Agent Card is exposed by the A2A SDK at the standard well-known path.
 python -m agentforge.protocols.mcp_server
 ```
 
-It exposes safe workspace tools over MCP v2 at `http://127.0.0.1:8001/mcp` by default.
+It exposes workspace tools at `http://127.0.0.1:8001/mcp` by default. This optional endpoint has no authentication layer; keep it bound to localhost.
 
 ## Run tests
 
@@ -126,17 +131,18 @@ It exposes safe workspace tools over MCP v2 at `http://127.0.0.1:8001/mcp` by de
 pytest -q
 ```
 
+For an offline judge demonstration, run `python -m examples.demo_repair` from the repository root. It uses labeled fake agent responses, executes the actual import/validation/repair/report pipeline against a tiny fixture, and saves `.agentforge-data/demo-report.md`. It does not demonstrate model quality.
+
 ## Security model
 
-AgentForge does not give an LLM arbitrary host-shell access. The Developer receives explicit file tools confined to a per-run workspace. Validation subprocesses are issued by deterministic Python code rather than by the model, use `shell=False`, have timeouts, and receive a reduced environment. This is a reference design, not a hardened remote-code-execution platform; production deployments should use OS/container isolation for generated code.
+AgentForge does not give an LLM arbitrary host-shell access. The Developer receives explicit file tools confined to a per-run workspace and cannot edit maintained tests, CI configuration, dependency configuration, or known credential paths. Source import has file and size limits. Docker validation runs without network, with a read-only workspace and resource limits; it still needs host-specific security review. Local validation is not an OS sandbox. Keep all HTTP endpoints bound to localhost. The main API requires a bearer token; the optional A2A/MCP facades do not.
 
 ## Framework roles
 
-- **OpenAI Agents SDK**: core Supervisor, Developer, Tester, Reviewer runtime and tool calling.
+- **OpenAI Agents SDK**: hosted OpenAI agent runtime. Local Ollama uses a direct API adapter because its native SDK dependency was blocked by Windows Application Control in this environment.
 - **CrewAI**: optional autonomous planning/architecture crew.
 - **BeeAI**: optional provider-agnostic research/risk specialist.
-- **A2A 1.0**: standardized external agent discovery/delegation surface.
-- **MCP v2**: standardized workspace tool surface.
+- **A2A/MCP integrations**: optional local prototype facades; conformance has not been verified.
 - **FastAPI**: normal application/API boundary.
 - **Pydantic**: typed reports and validation.
 
@@ -152,3 +158,19 @@ Read `docs/ENGINEERING_NOTES.md` first. It explains what was built, why each dec
 - CrewAI: https://docs.crewai.com/
 - BeeAI Framework: https://framework.beeai.dev/
 - OpenAI Agents SDK: https://openai.github.io/openai-agents-python/
+
+## Existing repository and test policy
+
+Use `agentforge build "Fix the bug" --source-repo C:\path\to\repo --test-manifest C:\path\to\manifest.json --allow-local-execution` in a trusted or isolated environment. The source is copied into a fresh run workspace and its Git commit is recorded. The original directory is not changed. See `docs/POLICIES.md` for trust and publication rules.
+
+A manifest maps changed paths to maintained tests:
+
+```json
+{"suites":[{"when":["agentforge/api.py"],"tests":["tests/test_api.py"]},{"when":["agentforge/*"],"tests":["tests/test_engine.py"]}]}
+```
+
+Selected tests run first, then the full pytest suite is the final gate. Runs without executable tests are `unverified`; failed checks are `failed`. Use `--generate-tests` to request provisional test suggestions when verification is incomplete. Suggestions are report text and never count as passing evidence. Each attempt records changed paths, baseline diff, and validation output.
+
+## Current scope
+
+The CLI/API, repository import, restricted file tools, bounded repair, and reports form a local prototype. The suite exercises a deterministic failed-test repair with fake agent responses. A real Ollama run on a small maintained fixture passed syntax and pytest after the model edited the copied source. See `docs/STATUS_2026-10-31.md` for exact evidence and remaining blockers. The dashboard, queue, GitHub webhooks/draft PRs, and deployment are not in this checkout. Do not claim production isolation or autonomous PR publication.

@@ -8,6 +8,7 @@ venv/
 .env
 .agentforge-data/
 .pytest_cache/
+.tmp/
 .ruff_cache/
 .coverage
 htmlcov/
