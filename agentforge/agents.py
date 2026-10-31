@@ -26,10 +26,34 @@ def build_workspace_tools(workspace: Workspace) -> list[Any]:
             return f"ERROR: {exc}"
 
     @function_tool
+    def read_lines(path: str, start_line: int, end_line: int) -> str:
+        """Read a 1-based inclusive line range, up to 200 lines."""
+        try:
+            return workspace.read_lines(path, start_line, end_line)
+        except (WorkspaceError, OSError, UnicodeError) as exc:
+            return f"ERROR: {exc}"
+
+    @function_tool
+    def search_files(query: str, path: str = ".") -> str:
+        """Find literal text in workspace Python files and return path and line numbers."""
+        try:
+            return workspace.search_files(query, path)
+        except (WorkspaceError, OSError, UnicodeError) as exc:
+            return f"ERROR: {exc}"
+
+    @function_tool
     def write_file(path: str, content: str) -> str:
         """Create or replace a UTF-8 file within this run's workspace."""
         try:
             return workspace.write_text(path, content)
+        except (WorkspaceError, OSError, UnicodeError) as exc:
+            return f"ERROR: {exc}"
+
+    @function_tool
+    def replace_text(path: str, old: str, new: str) -> str:
+        """Replace exactly one matching text fragment in a workspace file."""
+        try:
+            return workspace.replace_text(path, old, new)
         except (WorkspaceError, OSError, UnicodeError) as exc:
             return f"ERROR: {exc}"
 
@@ -41,7 +65,7 @@ def build_workspace_tools(workspace: Workspace) -> list[Any]:
         except (WorkspaceError, OSError) as exc:
             return f"ERROR: {exc}"
 
-    return [read_file, write_file, list_files]
+    return [read_file, read_lines, search_files, write_file, replace_text, list_files]
 
 
 async def run_agent(
@@ -71,6 +95,17 @@ _OLLAMA_TOOLS = [
                      "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "list_files", "description": "List workspace files.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}}}}},
+    {"type": "function", "function": {"name": "search_files", "description": "Search Python files for literal text and return line numbers.",
+      "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "path": {"type": "string"}},
+                     "required": ["query"]}}},
+    {"type": "function", "function": {"name": "read_lines", "description": "Read a 1-based inclusive line range, at most 200 lines.",
+      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"},
+                                             "end_line": {"type": "integer"}},
+                     "required": ["path", "start_line", "end_line"]}}},
+    {"type": "function", "function": {"name": "replace_text", "description": "Replace one exact text fragment in a file without rewriting the whole file.",
+      "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
+                                             "new": {"type": "string"}},
+                     "required": ["path", "old", "new"]}}},
 ]
 
 
@@ -89,7 +124,8 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat":
         raise ValueError("Ollama endpoint must be local")
     if tools:
-        instructions += ("\nWhen using a file tool, send a native tool call. If your model cannot send one, "
+        instructions += ("\nUse search_files and read_lines to inspect large files. Prefer replace_text for small edits. "
+                         "When using a file tool, send a native tool call. If your model cannot send one, "
                          "respond with ONLY a JSON object such as "
                          '{"name":"write_file","arguments":{"path":"sample.py","content":"..."}}. '
                          "Wait for the tool result before claiming a change.")
@@ -111,7 +147,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                 content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
             try:
                 candidate = json.loads(content)
-                if isinstance(candidate, dict) and candidate.get("name") in {"read_file", "write_file", "list_files"}:
+                if isinstance(candidate, dict) and candidate.get("name") in {"read_file", "read_lines", "search_files", "write_file", "replace_text", "list_files"}:
                     calls = [{"function": candidate}]
             except json.JSONDecodeError:
                 pass
@@ -132,6 +168,10 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             try:
                 if name == "read_file":
                     result = workspace.read_text(args["path"])
+                elif name == "read_lines":
+                    result = workspace.read_lines(args["path"], args["start_line"], args["end_line"])
+                elif name == "search_files":
+                    result = workspace.search_files(args["query"], args.get("path", "."))
                 elif name == "write_file":
                     fingerprint = (args["path"], args["content"])
                     if fingerprint in applied_writes:
@@ -142,6 +182,12 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     except WorkspaceError:
                         pass
                     result = workspace.write_text(args["path"], args["content"])
+                    applied_writes.add(fingerprint)
+                elif name == "replace_text":
+                    fingerprint = (args["path"], args["old"] + "\0" + args["new"])
+                    if fingerprint in applied_writes:
+                        return "Repeated replacement suppressed; the change was applied in the workspace."
+                    result = workspace.replace_text(args["path"], args["old"], args["new"])
                     applied_writes.add(fingerprint)
                 elif name == "list_files":
                     result = "\n".join(workspace.list_files(args.get("path", ".")))

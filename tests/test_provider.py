@@ -67,3 +67,18 @@ def test_repeated_ollama_write_finishes_without_loop(tmp_path, monkeypatch):
                                    tools=[Workspace(tmp_path)], provider="ollama"))
     assert "Repeated write suppressed" in result
     assert (tmp_path / "sample.py").read_text() == "value = 2"
+
+
+def test_ollama_exact_replacement_tool(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        {"message": {"role": "assistant", "content":
+                     '{"name":"replace_text","arguments":{"path":"sample.py","old":"value = 0","new":"value = 2"}}'}},
+        {"message": {"role": "assistant", "content": "Fixed."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    result = asyncio.run(run_agent("Developer", "instructions", "Fix value",
+                                   tools=[Workspace(tmp_path)], provider="ollama"))
+    assert result == "Fixed."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"

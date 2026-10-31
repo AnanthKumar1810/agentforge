@@ -51,6 +51,41 @@ class Workspace:
             raise WorkspaceError("File exceeds the configured size limit")
         return target.read_text(encoding="utf-8")
 
+    def read_lines(self, relative_path: str, start_line: int, end_line: int) -> str:
+        if not isinstance(start_line, int) or not isinstance(end_line, int) or start_line < 1 or end_line < start_line or end_line - start_line >= 200:
+            raise WorkspaceError("Line range must be 1-based and at most 200 lines")
+        lines = self.read_text(relative_path).splitlines(keepends=True)
+        if start_line > len(lines):
+            raise WorkspaceError("Start line exceeds the file length")
+        return "".join(lines[start_line - 1:end_line])
+
+    def search_files(self, query: str, relative_path: str = ".") -> str:
+        if not query or len(query) > 200:
+            raise WorkspaceError("Search query must be 1 to 200 characters")
+        base = self.root if relative_path == "." else self.resolve(relative_path)
+        paths = [base] if base.is_file() else list(base.rglob("*.py"))
+        results = []
+        for path in paths[:1000]:
+            if not path.is_file() or self._sensitive(path):
+                continue
+            try:
+                for number, line in enumerate(self.read_text(path.relative_to(self.root).as_posix()).splitlines(), 1):
+                    if query.lower() in line.lower():
+                        results.append(f"{path.relative_to(self.root).as_posix()}:{number}: {line[:200]}")
+                        if len(results) == 50:
+                            return "\n".join(results) + "\n[search truncated at 50 matches]"
+            except (OSError, UnicodeError, WorkspaceError):
+                continue
+        return "\n".join(results) or "(no matches)"
+
+    def replace_text(self, relative_path: str, old: str, new: str) -> str:
+        if not old or len(old.encode("utf-8")) > self.max_file_bytes:
+            raise WorkspaceError("Replacement source must be nonempty and within the file size limit")
+        content = self.read_text(relative_path)
+        if content.count(old) != 1:
+            raise WorkspaceError("Replacement source must occur exactly once")
+        return self.write_text(relative_path, content.replace(old, new, 1))
+
     def write_text(self, relative_path: str, content: str) -> str:
         target = self.resolve(relative_path)
         parts = target.relative_to(self.root).parts

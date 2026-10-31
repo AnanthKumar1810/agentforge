@@ -31,3 +31,18 @@ def test_agent_cannot_read_credentials(tmp_path: Path) -> None:
     (ws.root / ".env").write_text("SECRET=example")
     with pytest.raises(WorkspaceError, match="Credential"):
         ws.read_text(".env")
+
+
+def test_bounded_read_search_and_exact_replacement(tmp_path: Path) -> None:
+    ws = Workspace(tmp_path / "workspace", max_file_bytes=1000)
+    ws.write_text("src/module.py", "def value():\n    return 0\n")
+    assert "src/module.py:2:     return 0" in ws.search_files("return 0")
+    assert ws.read_lines("src/module.py", 2, 2) == "    return 0\n"
+    ws.replace_text("src/module.py", "return 0", "return 2")
+    assert ws.read_text("src/module.py").endswith("return 2\n")
+    with pytest.raises(WorkspaceError, match="exactly once"):
+        ws.replace_text("src/module.py", "return 0", "return 3")
+    with pytest.raises(WorkspaceError, match="Line range"):
+        ws.read_lines("src/module.py", 1, 201)
+    (ws.root / ".env").write_text("SECRET=example")
+    assert "SECRET" not in ws.search_files("SECRET")
