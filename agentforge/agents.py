@@ -199,6 +199,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     result = "ERROR: Unknown tool"
             except (WorkspaceError, OSError, UnicodeError, KeyError, TypeError) as exc:
                 result = f"ERROR: {exc}"
+            tool_trace[-1] += ": " + (result[:120] if result.startswith("ERROR:") else "ok")
             messages.append({"role": "tool", "tool_name": name, "content": result[:500_000]})
     if applied_writes:
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."

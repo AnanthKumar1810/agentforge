@@ -133,6 +133,8 @@ pytest -q
 
 For an offline judge demonstration, run `python -m examples.demo_repair` from the repository root. It uses labeled fake agent responses, executes the actual import/validation/repair/report pipeline against a tiny fixture, and saves `.agentforge-data/demo-report.md`. It does not demonstrate model quality.
 
+For pinned public-repository tests, see [the repository benchmark](docs/REPOSITORY_BENCHMARK.md). It checks real upstream test suites and deliberately broken source in a restricted Docker container, then runs live local-model repairs in GitHub Actions.
+
 ## Security model
 
 AgentForge does not give an LLM arbitrary host-shell access. The Developer receives explicit file tools confined to a per-run workspace and cannot edit maintained tests, CI configuration, dependency configuration, or known credential paths. Source import has file and size limits. Docker validation runs without network, with a read-only workspace and resource limits; it still needs host-specific security review. Local validation is not an OS sandbox. Keep all HTTP endpoints bound to localhost. The main API requires a bearer token; the optional A2A/MCP facades do not.
@@ -174,3 +176,4 @@ Selected tests run first, then the full pytest suite is the final gate. Runs wit
 ## Current scope
 
 The CLI/API, repository import, restricted file tools, bounded repair, and reports form a local prototype. The suite exercises a deterministic failed-test repair with fake agent responses. A real Ollama run on a small maintained fixture passed syntax and pytest after the model edited the copied source. See `docs/STATUS_2026-10-31.md` for exact evidence and remaining blockers. The dashboard, queue, GitHub webhooks/draft PRs, and deployment are not in this checkout. Do not claim production isolation or autonomous PR publication.
+
