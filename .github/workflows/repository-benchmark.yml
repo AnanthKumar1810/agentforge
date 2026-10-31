@@ -26,3 +26,38 @@ jobs:
         with:
           name: pinned-repository-results
           path: .agentforge-data/benchmark/results.json
+  ollama-repair:
+    needs: docker-preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [boltons-clamp, more-itertools-take]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -e ".[dev]"
+      - run: docker build -t agentforge-validator:py313 validator
+      - name: Install and start Ollama locally
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          OLLAMA_NO_CLOUD=1 OLLAMA_HOST=127.0.0.1:11434 ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:11434/api/tags > /dev/null; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/ollama.log"
+          exit 1
+      - run: ollama pull qwen2.5-coder:7b
+      - name: Run isolated repair benchmark
+        run: python -m benchmarks.repository_mutations --model qwen2.5-coder:7b --case "${{ matrix.case }}" --output ".agentforge-data/benchmark/${{ matrix.case }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ollama-repair-${{ matrix.case }}
+          path: .agentforge-data/benchmark/${{ matrix.case }}/results.json
+

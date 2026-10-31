@@ -73,10 +73,12 @@ def prepare(case: Case, checkout_dir: Path, root: Path) -> tuple[Path, Path]:
     return baseline, mutant
 
 
-async def run(model: str | None, output: Path) -> int:
+async def run(model: str | None, output: Path, selected_case: str | None = None) -> int:
     output.mkdir(parents=True, exist_ok=True)
     results = []
     for case in CASES:
+        if selected_case and case.name != selected_case:
+            continue
         root = output / case.name
         checkout_dir = root / "upstream"
         checkout(case, checkout_dir)
@@ -119,9 +121,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path(".agentforge-data/benchmark"))
     parser.add_argument("--model", help="Run real Ollama repairs after baseline/mutant validation")
+    parser.add_argument("--case", choices=[case.name for case in CASES], help="Run just one pinned case")
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(run(args.model, args.output.resolve())))
+    raise SystemExit(asyncio.run(run(args.model, args.output.resolve(), args.case)))
 
 
 if __name__ == "__main__":
     main()
+
