@@ -203,7 +203,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
             "error": item.get("repair", {}).get("error"),
             "changed_files": item.get("repair", {}).get("changed_files", []),
             "diff": item.get("repair", {}).get("diff", "")[:1000],
-            "validation_status": item.get("repair", {}).get("validation", {}).get("status"),
+            "validation_status": (item.get("repair", {}).get("validation") or {}).get("status"),
             "baseline_issues": baseline_check.issues[:2], "mutant_issues": mutant_check.issues[:2],
         }), flush=True)
     return 0 if all(
