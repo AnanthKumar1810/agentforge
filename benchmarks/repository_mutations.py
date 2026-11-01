@@ -72,7 +72,7 @@ CASES = (
         "Fix the off-by-one regression in more_itertools/recipes.py take(). Its maintained "
         "tests specify the correct number of items. Read lines 113 through 129 of "
         "more_itertools/recipes.py to inspect the whole function; then use "
-        "replace_line for its return statement. Do not edit tests.",
+        "replace_text for its return statement. Do not edit tests.",
     ),
     Case(
         "itsdangerous-compressed-payload", "https://github.com/pallets/itsdangerous.git",

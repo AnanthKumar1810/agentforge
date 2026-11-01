@@ -6,6 +6,7 @@ container or VM before using AgentForge for anything beyond local experimentatio
 
 from __future__ import annotations
 
+from itertools import islice
 from pathlib import Path, PureWindowsPath
 
 from agentforge.config import Settings
@@ -63,9 +64,10 @@ class Workspace:
         if not query or len(query) > 200:
             raise WorkspaceError("Search query must be 1 to 200 characters")
         base = self.root if relative_path == "." else self.resolve(relative_path)
-        paths = [base] if base.is_file() else list(base.rglob("*.py"))
+        # Keep traversal bounded without first materializing every path in a large tree.
+        paths = [base] if base.is_file() else islice(base.rglob("*.py"), 1000)
         results = []
-        for path in paths[:1000]:
+        for path in paths:
             if not path.is_file() or self._sensitive(path):
                 continue
             try:

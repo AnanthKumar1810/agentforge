@@ -2,6 +2,19 @@
 
 AgentForge is a reference implementation of an agentic software-engineering system. It deliberately combines deterministic orchestration with specialized AI agents instead of turning the entire application into one uncontrolled autonomous loop.
 
+## Competition evidence (November 1, 2026)
+
+The pinned Docker benchmark exercised **five real Python repositories**: all
+five original suites passed and all five injected regressions failed as expected.
+The local Ollama model completed **one verified guided repair out of five** in
+the [November 1 CI run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41267363640).
+See [the benchmark record](docs/REPOSITORY_BENCHMARK.md) for repositories,
+commits, per-case outcomes, reproduction commands, and larger-repository plans.
+These results support a working, auditable prototype; they do not establish
+general autonomous repair success.
+
+For a short presentation, follow the [competition demo](docs/COMPETITION_DEMO.md).
+
 ## What it does
 
 A user submits a software task. AgentForge:

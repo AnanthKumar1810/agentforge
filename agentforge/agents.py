@@ -207,7 +207,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             try:
                 schema = next((t["function"]["parameters"] for t in _OLLAMA_TOOLS
                                if t["function"]["name"] == name), None)
-                if schema is None:
+                if schema is None or (allowed_tool_names is not None and name not in allowed_tool_names):
                     raise WorkspaceError("Unknown tool")
                 if any(key not in args for key in schema.get("required", [])):
                     raise WorkspaceError("Missing required tool argument")

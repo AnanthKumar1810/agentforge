@@ -133,6 +133,32 @@ def test_ollama_numbered_line_replacement(tmp_path, monkeypatch):
     assert (tmp_path / "sample.py").read_text() == "def value():\n    return 2\n"
 
 
+def test_ollama_rejects_native_call_outside_workspace_allowlist(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    workspace = Workspace(tmp_path)
+    workspace.ollama_tool_allowlist = {"read_file"}
+    replies = [
+        {"message": {"role": "assistant", "content": "", "tool_calls": [
+            {"function": {"name": "write_file", "arguments": {
+                "path": "sample.py", "content": "value = 2\n"}}}
+        ]}},
+        {"message": {"role": "assistant", "content": "Done."}},
+    ]
+    observed = []
+
+    def chat(endpoint, payload):
+        observed.append(payload)
+        return replies.pop(0)
+
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    asyncio.run(run_agent("Developer", "instructions", "Read value", tools=[workspace],
+                          provider="ollama"))
+    assert [tool["function"]["name"] for tool in observed[0]["tools"]] == ["read_file"]
+    assert (tmp_path / "sample.py").read_text() == "value = 0\n"
+    assert observed[1]["messages"][-1]["content"] == "ERROR: Unknown tool"
+
+
 
 def _tool(name, **arguments):
     return {"function": {"name": name, "arguments": arguments}}
