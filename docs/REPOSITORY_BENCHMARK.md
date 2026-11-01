@@ -1,7 +1,7 @@
 # Pinned repository repair benchmark
 
 AgentForge has exercised five independently maintained Python repositories at
-exact upstream commits. The [November 1 CI run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41267363640)
+exact upstream commits. The [November 1 CI run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41277387572)
 confirmed that all five original test suites pass and each injected one-line
 regression makes its suite fail. A local `qwen2.5-coder:3b` repair was then
 attempted in each case. **One of five repairs passed** its full suite in Docker.

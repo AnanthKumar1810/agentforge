@@ -23,7 +23,7 @@ it is quick and reliable on a stage; identify it as a workflow demonstration,
 not a live model-quality result.
 
 For the real-model evidence, open the
-[November 1 benchmark run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41267363640)
+[November 1 benchmark run](https://github.com/AnanthKumar1810/agentforge/actions/runs/41277387572)
 and its `ollama-repair-*` artifacts. The Iniconfig case shows a source-only diff
 and a verified full suite. Four other cases made no accepted edit.
 

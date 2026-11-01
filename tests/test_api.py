@@ -34,6 +34,7 @@ def test_dashboard_submits_and_displays_job_result(monkeypatch, tmp_path):
     client = TestClient(app)
     page = client.get("/")
     assert page.status_code == 200 and "Start repair" in page.text
+    assert "Guided Ollama repairs verified" in page.text
     headers = {"Authorization": "Bearer demo-token"}
     assert client.get("/configuration", headers=headers).json()["provider"] == "ollama"
     assert client.post("/jobs", json={"request": "Fix sample.value()"}).status_code == 401
