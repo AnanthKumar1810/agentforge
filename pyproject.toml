@@ -26,7 +26,7 @@ agentforge = "agentforge.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agentforge*"]
+include = ["agentforge*", "benchmarks*"]
 
 [tool.setuptools.package-data]
 agentforge = ["static/*.html"]
