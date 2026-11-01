@@ -155,18 +155,28 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                     max_file_bytes=settings.max_file_bytes,
                 )
                 before = snapshot_bytes(workspace_path)
-                response = await run_agent(
-                    "Developer", DEVELOPER,
-                    f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
-                    f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
-                    "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
-                    "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
-                    "repair; do not read files, change tests, configuration, or dependencies, or execute commands.",
-                    tools=[workspace], model=model, provider="ollama",
-                    ollama_base_url=settings.ollama_base_url,
-                )
-                after = snapshot_bytes(workspace_path)
-                changed = changed_files(before, after)
+                responses = []
+                for attempt in range(2):
+                    retry_note = "" if attempt == 0 else (
+                        "\\nThe previous turn made no file change. Apply the exact replace_text tool call now; "
+                        "do not answer with a description."
+                    )
+                    response = await run_agent(
+                        "Developer", DEVELOPER,
+                        f"USER REQUEST\\n{case.request}\\n\\nTarget file: {case.file}\\n"
+                        f"Injected line: {case.mutant}\\nExpected pre-mutation line: {case.original}\\n"
+                        "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
+                        "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
+                        "repair; do not change tests, configuration, or dependencies, or execute commands."
+                        + retry_note,
+                        tools=[workspace], model=model, provider="ollama",
+                        ollama_base_url=settings.ollama_base_url,
+                    )
+                    responses.append(response)
+                    after = snapshot_bytes(workspace_path)
+                    changed = changed_files(before, after)
+                    if changed:
+                        break
                 diff = "".join(difflib.unified_diff(
                     before.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
                     after.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
@@ -177,7 +187,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                               if source_only else None)
                 item["repair"] = {
                     "status": "passed" if validation and validation.status == "verified" else "failed",
-                    "response": response,
+                    "response": responses,\n                    "repair_attempts": len(responses),
                     "changed_files": changed,
                     "source_only": source_only,
                     "diff": diff,
