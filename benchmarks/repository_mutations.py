@@ -63,7 +63,7 @@ CASES = (
         "Fix the regression in boltons/mathutils.py clamp(): values inside and outside the "
         "lower/upper bounds should behave as the maintained tests specify. Read "
         "lines 40 through 72 of boltons/mathutils.py to inspect the whole function; "
-        "then use replace_line for its return statement. Do not edit tests.",
+        "call replace_text with the exact target path, injected line, and expected pre-mutation line. Do not edit tests.",
     ),
     Case(
         "more-itertools-take", "https://github.com/more-itertools/more-itertools.git",
@@ -158,13 +158,13 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                 responses = []
                 for attempt in range(2):
                     retry_note = "" if attempt == 0 else (
-                        "\\nThe previous turn made no file change. Apply the exact replace_text tool call now; "
+                        "\nThe previous turn made no file change. Apply the exact replace_text tool call now; "
                         "do not answer with a description."
                     )
                     response = await run_agent(
                         "Developer", DEVELOPER,
-                        f"USER REQUEST\\n{case.request}\\n\\nTarget file: {case.file}\\n"
-                        f"Injected line: {case.mutant}\\nExpected pre-mutation line: {case.original}\\n"
+                        f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
+                        f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
                         "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
                         "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
                         "repair; do not change tests, configuration, or dependencies, or execute commands."
