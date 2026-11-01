@@ -42,7 +42,7 @@ class SeededRepairWorkspace(Workspace):
         raise WorkspaceError("Use replace_text for this benchmark's exact seeded line.")
 
     def write_text(self, relative_path: str, content: str) -> str:
-        normalized = relative_path.replace("\\\\", "/")
+        normalized = relative_path.replace("\\", "/")
         if normalized != self._target:
             raise WorkspaceError("Only the seeded target file may be edited.")
         current = super().read_text(relative_path)
@@ -149,7 +149,10 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
             if fast:
                 workspace_path = settings.data_dir / "workspace"
                 import_source(str(mutant), workspace_path)
-                workspace = SeededRepairWorkspace(\n                    workspace_path, target=case.file, injected=case.mutant, expected=case.original,\n                    max_file_bytes=settings.max_file_bytes,\n                )
+                workspace = SeededRepairWorkspace(
+                    workspace_path, target=case.file, injected=case.mutant, expected=case.original,
+                    max_file_bytes=settings.max_file_bytes,
+                )
                 before = snapshot_bytes(workspace_path)
                 response = await run_agent(
                     "Developer", DEVELOPER,
