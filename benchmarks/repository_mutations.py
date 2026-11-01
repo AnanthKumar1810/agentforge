@@ -129,9 +129,9 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                     "Developer", DEVELOPER,
                     f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
                     f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
-                    "This is a seeded, oracle-guided regression benchmark. First use search_files to locate the current injected line. "
-                    "Then call replace_text with the exact injected and pre-mutation lines to apply the one-line repair. "
-                    "Do not change tests, configuration, or dependencies. Do not execute commands.",
+                    "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
+                    "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
+                    "repair; do not read files, change tests, configuration, or dependencies, or execute commands.",
                     tools=[workspace], model=model, provider="ollama",
                     ollama_base_url=settings.ollama_base_url,
                 )
@@ -171,6 +171,9 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
             "name": case.name, "baseline": baseline_check.status, "mutant": mutant_check.status,
             "repair": item.get("repair", {}).get("status", "not run"),
             "error": item.get("repair", {}).get("error"),
+            "changed_files": item.get("repair", {}).get("changed_files", []),
+            "diff": item.get("repair", {}).get("diff", "")[:1000],
+            "validation_status": item.get("repair", {}).get("validation", {}).get("status"),
             "baseline_issues": baseline_check.issues[:2], "mutant_issues": mutant_check.issues[:2],
         }), flush=True)
     return 0 if all(
