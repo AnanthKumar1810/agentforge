@@ -177,3 +177,24 @@ Selected tests run first, then the full pytest suite is the final gate. Runs wit
 
 The CLI/API, repository import, restricted file tools, bounded repair, and reports form a local prototype. The suite exercises a deterministic failed-test repair with fake agent responses. A real Ollama run on a small maintained fixture passed syntax and pytest after the model edited the copied source. See `docs/STATUS_2026-10-31.md` for exact evidence and remaining blockers. The dashboard, queue, GitHub webhooks/draft PRs, and deployment are not in this checkout. Do not claim production isolation or autonomous PR publication.
 
+# Local prompt dashboard
+
+Run the browser interface from the repository root. For a trusted demo fixture on
+Windows PowerShell, start Ollama separately if it is not already running, then:
+
+```powershell
+$env:AGENTFORGE_PROVIDER = "ollama"
+$env:AGENTFORGE_MODEL = "qwen2.5-coder:7b"
+$env:AGENTFORGE_VALIDATOR = "local"
+$env:AGENTFORGE_API_TOKEN = "choose-a-long-private-token"
+.\.venv\Scripts\python.exe -m agentforge.cli api --host 127.0.0.1 --port 8000
+```
+
+Open `http://127.0.0.1:8000/`, enter the same token, keep the maintained example
+folder `examples/repair_target`, confirm local execution for this trusted fixture,
+and press **Start repair**. The page polls the background job and shows the
+actual diff and validation evidence. Jobs are held in server memory; saved run
+reports remain under `.agentforge-data/runs/`. A server restart clears job status.
+Local validation executes repository tests on the host, so use it only for code
+you trust. The default Docker validator remains the choice for unknown code.
+

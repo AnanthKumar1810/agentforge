@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentForge · Repair workspace</title>
+  <style>
+    :root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#090c13;color:#edf2fc}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 85% 0%,#1c2945 0,transparent 38%),#090c13}
+    header,main{max-width:1120px;margin:auto;padding:24px}header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #263145}
+    .brand{font-size:22px;font-weight:750;letter-spacing:-.04em}.brand span{color:#80e7c5}.tag{font-size:12px;color:#9cacc7;border:1px solid #30405c;padding:7px 11px;border-radius:999px}
+    h1{font-size:clamp(28px,4vw,43px);letter-spacing:-.05em;margin:30px 0 8px}p{color:#a9b9d1;line-height:1.5}
+    .grid{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(300px,.7fr);gap:20px;margin-top:28px}.card{background:#121a28;border:1px solid #28374e;border-radius:18px;padding:24px;box-shadow:0 14px 45px #0003}
+    label{display:block;color:#c5d4e8;font-size:13px;font-weight:650;margin:18px 0 8px}input,textarea{width:100%;background:#0a111e;color:#f1f6ff;border:1px solid #35445e;border-radius:10px;padding:12px 14px;font:inherit;outline:none}input:focus,textarea:focus{border-color:#69d9b5}textarea{min-height:125px;resize:vertical}
+    .row{display:flex;align-items:center;gap:10px;margin:20px 0;color:#b3c3d9;font-size:13px}.row input{width:auto;accent-color:#70dfb8}
+    button{background:#75e4be;color:#061d19;font-weight:750;border:0;border-radius:10px;padding:13px 19px;cursor:pointer;font:inherit}button:disabled{opacity:.55;cursor:wait}
+    .muted{font-size:12px;color:#879ab6}.status{border-radius:10px;background:#0a111e;border:1px solid #35445e;padding:13px;margin:18px 0;min-height:48px}.pass{color:#83ecc4}.fail{color:#ffa99d}
+    .metric{display:grid;grid-template-columns:1fr 1fr;gap:12px}.metric>div{background:#0a111e;border-radius:10px;padding:13px}.metric strong{display:block;font-size:19px;margin-top:5px}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#090f19;border:1px solid #27354c;border-radius:10px;padding:14px;font-size:12px;max-height:350px;overflow:auto;color:#c9d9ea}details{margin-top:14px}summary{cursor:pointer;color:#9fead1}
+    @media(max-width:760px){.grid{grid-template-columns:1fr}header,main{padding:18px}.card{padding:18px}}
+  </style>
+</head>
+<body>
+  <header><div class="brand">Agent<span>Forge</span></div><div class="tag">LOCAL REPAIR WORKSPACE</div></header>
+  <main><h1>Give a bug a clear task.<br>See the proof.</h1><p>AgentForge edits a separate copy, runs the maintained tests, and records exactly what changed.</p>
+    <div class="grid"><section class="card"><h2>Start a repair</h2>
+      <label for="token">Local API token</label><input id="token" type="password" autocomplete="off" placeholder="Token set in AGENTFORGE_API_TOKEN">
+      <label for="source">Project folder on this computer</label><input id="source" value="examples/repair_target" spellcheck="false">
+      <label for="prompt">What should AgentForge do?</label><textarea id="prompt">Fix sample.value() so the maintained test expects and receives 2. Make the smallest change.</textarea>
+      <div class="row"><input id="trusted" type="checkbox"><label for="trusted" style="margin:0">I trust this project's code and allow local test execution</label></div>
+      <button id="start">Start repair</button><p class="muted">For unknown repositories, use the Docker validator. A local run may take several minutes.</p>
+    </section><section class="card"><h2>Run evidence</h2><div id="configuration" class="muted">Enter the token to inspect model settings.</div>
+      <div class="status" id="status" role="status" aria-live="polite">Ready for a task.</div>
+      <div class="metric"><div>Result<strong id="result">—</strong></div><div>Attempts<strong id="attempts">—</strong></div></div>
+      <details open><summary>Changes</summary><pre id="diff">No changes yet.</pre></details>
+      <details><summary>Validation checks</summary><pre id="checks">No checks yet.</pre></details>
+      <p class="muted" id="run-id"></p>
+    </section></div>
+  </main>
+  <script>
+    const $=id=>document.getElementById(id); let polling=null;
+    const headers=()=>({'Authorization':'Bearer '+$('token').value,'Content-Type':'application/json'});
+    async function request(url,options={}){const res=await fetch(url,{...options,headers:headers(),cache:'no-store'});let data=await res.json();if(!res.ok)throw new Error(data.detail||'Request failed');return data}
+    function status(text,failed=false){$('status').textContent=text;$('status').className='status '+(failed?'fail':'')}
+    $('token').addEventListener('change',async()=>{try{const c=await request('/configuration');$('configuration').textContent=`${c.provider} · ${c.model} · ${c.validator} validator`;}catch(e){$('configuration').textContent=e.message}});
+    $('start').addEventListener('click',async()=>{
+      clearInterval(polling);$('start').disabled=true;$('result').textContent='—';$('attempts').textContent='—';$('diff').textContent='Waiting for model…';$('checks').textContent='Waiting for validation…';
+      try{
+        if(!$('token').value.trim())throw new Error('Enter the local API token.');
+        if(!$('trusted').checked)throw new Error('Confirm local test execution for this trusted project.');
+        const job=await request('/jobs',{method:'POST',body:JSON.stringify({request:$('prompt').value,source_repo:$('source').value,allow_local_execution:true})});
+        $('run-id').textContent='Job '+job.job_id;status('Queued…');
+        const check=async()=>{try{const j=await request('/jobs/'+job.job_id);
+          if(j.status==='queued'||j.status==='running'){status(j.status==='queued'?'Queued…':'Model is working. Validation follows the edit…');return}
+          clearInterval(polling);$('start').disabled=false;
+          if(j.status==='error'){status(j.error,true);return}
+          const r=j.report;const ok=r.status==='passed'&&r.validation.status==='verified';
+          status(ok?'Verified repair: maintained tests passed.':`Run ${r.status}: ${r.validation.status}${r.error?' · '+r.error:''}`,!ok);
+          $('result').textContent=r.validation.status;$('result').className=ok?'pass':'fail';$('attempts').textContent=r.attempts.length;
+          $('diff').textContent=r.attempts.flatMap(a=>Object.entries(a.diffs||{}).map(([path,d])=>`Round ${a.round} · ${path}\n${d}`)).join('\n')||'No file changes recorded.';
+          $('checks').textContent=r.attempts.flatMap(a=>a.validation.checks.map(c=>`Round ${a.round} · ${c.name}: ${c.passed?'PASS':'FAIL'}\n${c.output}`)).join('\n\n')||r.validation.issues.join('\n')||'No checks recorded.';
+          $('run-id').textContent='Run '+r.run_id+' · report saved in '+r.artifacts.json;
+        }catch(e){clearInterval(polling);$('start').disabled=false;status(e.message,true)}};
+        await check();if($('start').disabled)polling=setInterval(check,2000);
+      }catch(e){$('start').disabled=false;status(e.message,true)}
+    });
+  </script>
+</body></html>
