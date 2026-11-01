@@ -211,7 +211,7 @@ def test_ollama_ignores_environment_proxy_and_closes_response(monkeypatch):
     class Opener:
         def open(self, request, timeout):
             assert request.full_url == "http://127.0.0.1:11434/api/chat"
-            assert timeout == 180
+            assert timeout == 360
             return response
 
     def build(handler):

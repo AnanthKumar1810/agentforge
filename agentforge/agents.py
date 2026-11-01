@@ -126,7 +126,7 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
     request = Request(endpoint, data=json.dumps(payload).encode("utf-8"),
                       headers={"Content-Type": "application/json"})
     # The configured endpoint is validated as localhost by Settings.
-    with build_opener(ProxyHandler({})).open(request, timeout=180) as response:
+    with build_opener(ProxyHandler({})).open(request, timeout=360) as response:
         return json.load(response)
 
 

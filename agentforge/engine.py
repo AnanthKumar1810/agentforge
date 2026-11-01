@@ -47,6 +47,7 @@ class AgentForgeEngine:
         max_repair_rounds: int | None = None, source_repo: str | None = None,
         test_manifest: str | None = None, generate_tests: bool = False,
         allow_local_execution: bool = False,
+        fast_mode: bool = False,
     ) -> RunReport:
         if not request or not request.strip():
             raise ValueError("request cannot be empty")
@@ -74,7 +75,8 @@ class AgentForgeEngine:
             if source_repo:
                 optional_context.update(import_source(source_repo, workspace_path))
             baseline = snapshot_bytes(workspace_path)
-            plan = await self._ask("Supervisor", SUPERVISOR, f"User request:\n{request}")
+            plan = ("Direct repair: apply the requested change and run maintained tests."
+                    if fast_mode else await self._ask("Supervisor", SUPERVISOR, f"User request:\n{request}"))
             if use_crewai:
                 optional_context["crewai_plan"] = await run_crewai_planning(request, self.settings.model)
             if use_beeai:
@@ -113,10 +115,11 @@ class AgentForgeEngine:
                 if validation.status == "syntax_only" or validation.passed or protected or attempt >= repair_limit:
                     break
                 repair_rounds += 1
-                tester_note = await self._ask(
+                tester_note = ("Use the recorded validation failure to guide the next repair."
+                               if fast_mode else await self._ask(
                     "Tester", TESTER,
                     f"Task: {request}\n\nValidation evidence:\n{validation.model_dump_json(indent=2)}",
-                )
+                ))
                 tester_notes.append(tester_note)
                 changes_summary = await self._ask(
                     "Developer", DEVELOPER,
@@ -130,11 +133,12 @@ class AgentForgeEngine:
                     "TestDesigner", "Propose tests for uncovered acceptance criteria. Do not edit files or claim they ran.",
                     f"Request: {request}\nValidation: {validation.model_dump_json()}\nChanged: {changed}",
                 )
-            review = await self._ask(
+            review = ("Demo mode: deterministic validation is the source of truth. "
+                      f"Final status: {validation.status}." if fast_mode else await self._ask(
                 "Reviewer", REVIEWER,
                 f"Request:\n{request}\n\nPlan:\n{plan}\n\nChange summary:\n{changes_summary}\n\n"
                 f"Validation evidence:\n{validation.model_dump_json(indent=2)}\n\nFiles and sizes:\n{workspace.snapshot()!r}",
-            )
+            ))
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
 
@@ -144,7 +148,7 @@ class AgentForgeEngine:
             finished_at=datetime.now(timezone.utc), workspace=str(workspace_path.resolve()),
             plan=plan, optional_context=optional_context, validation=validation,
             repair_rounds=repair_rounds, attempts=attempts, tester_notes=tester_notes, review=review, error=error,
-            metadata={"model": self.settings.model, "provider": self.settings.provider, "validator": self.settings.validator, "max_repair_rounds": repair_limit, "change_summary": changes_summary, "allow_local_execution": allow_local_execution},
+            metadata={"model": self.settings.model, "provider": self.settings.provider, "validator": self.settings.validator, "max_repair_rounds": repair_limit, "change_summary": changes_summary, "allow_local_execution": allow_local_execution, "fast_mode": fast_mode},
         )
         report.artifacts = write_reports(report, output_dir)
         return report

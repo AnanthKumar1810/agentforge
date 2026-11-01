@@ -112,3 +112,30 @@ def test_direct_ollama_handoff_reaches_real_validation(tmp_path, monkeypatch):
     assert any(check.name == "pytest" and check.passed for check in report.validation.checks)
     assert "return 2" in report.attempts[0]["diffs"]["sample.py"]
     assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
+def test_fast_mode_runs_developer_and_real_validation(tmp_path, monkeypatch):
+    import asyncio
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    (source / "tests").mkdir(parents=True)
+    (source / "sample.py").write_text("def value(): return 0\n")
+    (source / "tests/test_value.py").write_text(
+        "from sample import value\ndef test_value(): assert value() == 2\n")
+    roles = []
+
+    async def agent(name, instructions, prompt, *, tools=None, model="unused"):
+        roles.append(name)
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "return 0", "return 2")
+        return "Done"
+
+    settings = Settings("demo", tmp_path / "data", 0, 20, 1000, "unused", validator="local")
+    report = asyncio.run(AgentForgeEngine(settings, agent_call=agent).run(
+        "Fix value", source_repo=str(source), allow_local_execution=True, fast_mode=True))
+    assert roles == ["Developer"]
+    assert report.status == "passed"
+    assert report.validation.status == "verified"
+    assert report.attempts[0]["changed_files"] == ["sample.py"]
+    assert "return 0" in (source / "sample.py").read_text()

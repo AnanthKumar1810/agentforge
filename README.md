@@ -198,3 +198,5 @@ reports remain under `.agentforge-data/runs/`. A server restart clears job statu
 Local validation executes repository tests on the host, so use it only for code
 you trust. The default Docker validator remains the choice for unknown code.
 
+
+The browser demo uses `fast_mode`: it skips the separate model planning, tester, and reviewer calls, then performs the actual model edit and the same deterministic validation and report. This reduces waiting time but does not guarantee a repair will pass. Ollama requests have a six-minute per-call timeout to accommodate a slow first load. Prewarm the model before a timed demo.
