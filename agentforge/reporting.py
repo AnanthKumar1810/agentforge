@@ -37,7 +37,7 @@ def write_reports(report: RunReport, output_dir: Path) -> dict[str, str]:
             lines += [f"- Issue: {issue}"]
         for path, diff in attempt["diffs"].items():
             lines += [f"#### {path}", "", "```diff", diff, "```", ""]
-    lines += ["## Review", "", report.review or "(No review output)", ""]
+    lines += ["## Model review (interpretation, not validation evidence)", "", report.review or "(No review output)", ""]
     if report.error:
         lines += ["## Error", "", report.error, ""]
     markdown_path.write_text("\n".join(lines), encoding="utf-8")

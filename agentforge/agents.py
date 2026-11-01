@@ -133,7 +133,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                             model: str, base_url: str) -> str:
     endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
     parsed = urlsplit(endpoint)
-    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat":
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("Ollama endpoint must be local")
     if tools:
         instructions += ("\nUse search_files and read_lines to inspect large files. Use replace_line with a search result's line number for one-line edits. "
@@ -144,7 +144,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     messages: list[dict] = [{"role": "system", "content": instructions},
                             {"role": "user", "content": prompt}]
     workspace = tools[0] if tools and isinstance(tools[0], Workspace) else None
-    applied_writes: set[tuple[str, str]] = set()
+    applied_writes: dict[str, str] = {}
     tool_trace: list[str] = []
     for _ in range(16):
         payload = {"model": model, "messages": messages, "stream": False,
@@ -152,8 +152,12 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
         if workspace is not None:
             payload["tools"] = _OLLAMA_TOOLS
         response = await asyncio.to_thread(_ollama_chat, endpoint, payload)
-        message = response.get("message", {})
+        if not isinstance(response, dict) or not isinstance(response.get("message"), dict):
+            raise RuntimeError("Ollama returned an invalid message envelope")
+        message = response["message"]
         calls = message.get("tool_calls") or []
+        if not isinstance(calls, list) or len(calls) > 32:
+            raise RuntimeError("Ollama returned invalid or excessive tool calls")
         if not calls and workspace is not None:
             content = str(message.get("content", "")).strip()
             if content.startswith("```"):
@@ -169,8 +173,13 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
         if workspace is None:
             raise RuntimeError("Ollama requested tools for an agent without a workspace")
         messages.append(message)
+        batch_changed = False
+        batch_write = False
+        batch_error = False
         for call in calls:
-            function = call.get("function", {})
+            function = call.get("function", {}) if isinstance(call, dict) else {}
+            if not isinstance(function, dict):
+                function = {}
             name = function.get("name")
             args = function.get("arguments") or {}
             if isinstance(args, str):
@@ -182,43 +191,58 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                 args = {}
             tool_trace.append(f"{name}({str(args.get('path', ''))[:80]})")
             try:
+                schema = next((t["function"]["parameters"] for t in _OLLAMA_TOOLS
+                               if t["function"]["name"] == name), None)
+                if schema is None:
+                    raise WorkspaceError("Unknown tool")
+                if any(key not in args for key in schema.get("required", [])):
+                    raise WorkspaceError("Missing required tool argument")
+                for key, value in args.items():
+                    spec = schema["properties"].get(key)
+                    if spec is None:
+                        raise WorkspaceError("Unknown tool argument")
+                    expected = str if spec["type"] == "string" else int
+                    if not isinstance(value, expected) or isinstance(value, bool):
+                        raise WorkspaceError(f"Invalid type for tool argument: {key}")
                 if name == "read_file":
                     result = workspace.read_text(args["path"])
                 elif name == "read_lines":
                     result = workspace.read_lines(args["path"], args["start_line"], args["end_line"])
                 elif name == "search_files":
                     result = workspace.search_files(args["query"], args.get("path", "."))
-                elif name == "write_file":
-                    fingerprint = (args["path"], args["content"])
-                    if fingerprint in applied_writes:
-                        return "Repeated write suppressed; the change was applied in the workspace."
+                elif name in {"write_file", "replace_text", "replace_line"}:
+                    batch_write = True
+                    fingerprint = json.dumps([name, args], sort_keys=True)
                     try:
-                        if workspace.read_text(args["path"]).strip() == args["content"].strip():
-                            return "Equivalent write suppressed; the change is already in the workspace."
+                        before = workspace.read_text(args["path"])
                     except WorkspaceError:
-                        pass
-                    result = workspace.write_text(args["path"], args["content"])
-                    applied_writes.add(fingerprint)
-                elif name == "replace_text":
-                    fingerprint = (args["path"], args["old"] + "\0" + args["new"])
-                    if fingerprint in applied_writes:
-                        return "Repeated replacement suppressed; the change was applied in the workspace."
-                    result = workspace.replace_text(args["path"], args["old"], args["new"])
-                    applied_writes.add(fingerprint)
-                elif name == "replace_line":
-                    fingerprint = (args["path"], str(args["line"]) + "\0" + args["new"])
-                    if fingerprint in applied_writes:
-                        return "Repeated line replacement suppressed; the change was applied in the workspace."
-                    result = workspace.replace_line(args["path"], args["line"], args["new"])
-                    applied_writes.add(fingerprint)
+                        before = None
+                    if fingerprint in applied_writes and before == applied_writes[fingerprint]:
+                        result = "Repeated write suppressed; current file matches the applied change."
+                    elif name == "write_file" and before == args["content"]:
+                        result = "Equivalent write suppressed; exact content is already present."
+                    else:
+                        if name == "write_file":
+                            result = workspace.write_text(args["path"], args["content"])
+                        elif name == "replace_text":
+                            result = workspace.replace_text(args["path"], args["old"], args["new"])
+                        else:
+                            result = workspace.replace_line(args["path"], args["line"], args["new"])
+                        after = workspace.read_text(args["path"])
+                        applied_writes[fingerprint] = after
+                        batch_changed |= before != after
                 elif name == "list_files":
                     result = "\n".join(workspace.list_files(args.get("path", ".")))
                 else:
                     result = "ERROR: Unknown tool"
             except (WorkspaceError, OSError, UnicodeError, KeyError, TypeError) as exc:
                 result = f"ERROR: {exc}"
+                batch_error = True
             tool_trace[-1] += ": " + (result[:120] if result.startswith("ERROR:") else "ok")
             messages.append({"role": "tool", "tool_name": name, "content": result[:500_000]})
+        # Finish the entire tool batch before handing control back to validation.
+        if batch_write and not batch_changed and not batch_error:
+            return "Repeated write suppressed; workspace is unchanged by this tool batch. Run deterministic validation."
     if applied_writes:
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
     raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files; "

@@ -124,3 +124,99 @@ def test_ollama_numbered_line_replacement(tmp_path, monkeypatch):
                                  provider="ollama")) == "Fixed."
     assert (tmp_path / "sample.py").read_text() == "def value():\n    return 2\n"
 
+
+
+def _tool(name, **arguments):
+    return {"function": {"name": name, "arguments": arguments}}
+
+
+def _reply(*calls):
+    return {"message": {"role": "assistant", "content": "", "tool_calls": list(calls)}}
+
+
+def _run_replies(tmp_path, monkeypatch, replies):
+    import agentforge.agents as module
+    iterator = iter(replies)
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: next(iterator))
+    return asyncio.run(run_agent("Developer", "instructions", "Fix files",
+                                 tools=[Workspace(tmp_path)], provider="ollama"))
+
+
+def test_whitespace_change_is_applied(tmp_path, monkeypatch):
+    (tmp_path / "code.py").write_text("    value = 2\n")
+    _run_replies(tmp_path, monkeypatch, [
+        _reply(_tool("write_file", path="code.py", content="value = 2\n")),
+        {"message": {"content": "Done"}},
+    ])
+    assert (tmp_path / "code.py").read_text() == "value = 2\n"
+
+
+def test_duplicate_does_not_discard_later_edit_in_batch(tmp_path, monkeypatch):
+    first = _tool("write_file", path="first.py", content="value = 2\n")
+    _run_replies(tmp_path, monkeypatch, [
+        _reply(first),
+        _reply(first, _tool("write_file", path="second.py", content="value = 3\n")),
+        {"message": {"content": "Done"}},
+    ])
+    assert (tmp_path / "second.py").read_text() == "value = 3\n"
+
+
+def test_repeated_call_reapplies_after_intervening_edit(tmp_path, monkeypatch):
+    first = _tool("write_file", path="code.py", content="value = 2\n")
+    _run_replies(tmp_path, monkeypatch, [
+        _reply(first),
+        _reply(_tool("write_file", path="code.py", content="value = 3\n")),
+        _reply(first),
+        {"message": {"content": "Done"}},
+    ])
+    assert (tmp_path / "code.py").read_text() == "value = 2\n"
+
+
+def test_invalid_tool_argument_allows_model_to_recover(tmp_path, monkeypatch):
+    _run_replies(tmp_path, monkeypatch, [
+        _reply(_tool("write_file", path=123, content="value = 0")),
+        _reply(_tool("write_file", path="code.py", content="value = 2\n")),
+        {"message": {"content": "Done"}},
+    ])
+    assert (tmp_path / "code.py").read_text() == "value = 2\n"
+
+
+def test_invalid_ollama_envelope_fails_explicitly(tmp_path, monkeypatch):
+    import pytest
+    with pytest.raises(RuntimeError, match="invalid message envelope"):
+        _run_replies(tmp_path, monkeypatch, [{"error": "model unavailable"}])
+
+
+def test_tool_batch_limit(tmp_path, monkeypatch):
+    import pytest
+    with pytest.raises(RuntimeError, match="excessive tool calls"):
+        _run_replies(tmp_path, monkeypatch, [_reply(*([_tool("list_files")] * 33))])
+
+
+def test_ollama_ignores_environment_proxy_and_closes_response(monkeypatch):
+    import io
+    import json
+    import agentforge.agents as module
+    monkeypatch.setenv("HTTP_PROXY", "http://example.invalid:9999")
+    response = io.BytesIO(json.dumps({"message": {"content": "Done"}}).encode())
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == "http://127.0.0.1:11434/api/chat"
+            assert timeout == 180
+            return response
+
+    def build(handler):
+        assert handler.proxies == {}
+        return Opener()
+
+    monkeypatch.setattr(module, "build_opener", build)
+    assert module._ollama_chat("http://127.0.0.1:11434/api/chat", {})["message"]["content"] == "Done"
+    assert response.closed
+
+
+def test_ollama_endpoint_rejects_credentials_and_query(tmp_path, monkeypatch):
+    import pytest
+    for base in ["http://user:secret@localhost:11434/v1/", "http://localhost:11434/v1/?x=1"]:
+        with pytest.raises(ValueError, match="local"):
+            asyncio.run(run_agent("Developer", "", "", provider="ollama", ollama_base_url=base))
