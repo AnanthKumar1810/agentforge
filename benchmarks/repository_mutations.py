@@ -187,7 +187,8 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                               if source_only else None)
                 item["repair"] = {
                     "status": "passed" if validation and validation.status == "verified" else "failed",
-                    "response": responses,\n                    "repair_attempts": len(responses),
+                    "response": responses,
+                    "repair_attempts": len(responses),
                     "changed_files": changed,
                     "source_only": source_only,
                     "diff": diff,
