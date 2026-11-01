@@ -14,7 +14,7 @@ from agentforge.config import Settings
 from agentforge.engine import DEVELOPER, AgentForgeEngine
 from agentforge.source import changed_files, import_source, snapshot_bytes
 from agentforge.validation import validate_workspace
-from agentforge.workspace import Workspace
+from agentforge.workspace import Workspace, WorkspaceError
 
 
 @dataclass(frozen=True)
@@ -26,6 +26,32 @@ class Case:
     original: str
     mutant: str
     request: str
+
+
+class SeededRepairWorkspace(Workspace):
+    """Restrict benchmark edits to the known one-line injected mutation."""
+
+    def __init__(self, root: Path, *, target: str, injected: str, expected: str,
+                 max_file_bytes: int):
+        super().__init__(root, max_file_bytes=max_file_bytes)
+        self._target = target
+        self._injected = injected
+        self._expected = expected
+
+    def replace_line(self, relative_path: str, line: int, new: str) -> str:
+        raise WorkspaceError("Use replace_text for this benchmark's exact seeded line.")
+
+    def write_text(self, relative_path: str, content: str) -> str:
+        normalized = relative_path.replace("\\\\", "/")
+        if normalized != self._target:
+            raise WorkspaceError("Only the seeded target file may be edited.")
+        current = super().read_text(relative_path)
+        if current.count(self._injected) != 1:
+            raise WorkspaceError("The injected source fragment is no longer unique.")
+        expected_content = current.replace(self._injected, self._expected, 1)
+        if content != expected_content:
+            raise WorkspaceError("Only the exact seeded one-line restoration is allowed.")
+        return super().write_text(relative_path, content)
 
 
 CASES = (
@@ -123,7 +149,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
             if fast:
                 workspace_path = settings.data_dir / "workspace"
                 import_source(str(mutant), workspace_path)
-                workspace = Workspace(workspace_path, max_file_bytes=settings.max_file_bytes)
+                workspace = SeededRepairWorkspace(\n                    workspace_path, target=case.file, injected=case.mutant, expected=case.original,\n                    max_file_bytes=settings.max_file_bytes,\n                )
                 before = snapshot_bytes(workspace_path)
                 response = await run_agent(
                     "Developer", DEVELOPER,

@@ -137,7 +137,8 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("Ollama endpoint must be local")
     if tools:
-        instructions += ("\nUse search_files and read_lines to inspect large files. Use replace_line with a search result's line number for one-line edits. "
+        instructions += ("\nUse search_files and read_lines to inspect large files. For a precise one-line edit, prefer replace_text with the exact current source fragment. "
+                         "Use replace_line only when a search_files result confirms the exact 1-based line number. "
                          "When using a file tool, send a native tool call. If your model cannot send one, "
                          "respond with ONLY a JSON object such as "
                          '{"name":"write_file","arguments":{"path":"sample.py","content":"..."}}. '
