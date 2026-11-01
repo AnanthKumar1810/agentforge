@@ -76,7 +76,9 @@ class Workspace:
                             return "\n".join(results) + "\n[search truncated at 50 matches]"
             except (OSError, UnicodeError, WorkspaceError):
                 continue
-        return "\n".join(results) or "(no matches)"
+        if not results and query.endswith("()") and query[:-2].isidentifier():
+            return self.search_files(query[:-2], relative_path)
+        return "\n".join(results) or "(no matches; try a shorter identifier or a path-limited search)"
 
     def replace_text(self, relative_path: str, old: str, new: str) -> str:
         if not old or len(old.encode("utf-8")) > self.max_file_bytes:

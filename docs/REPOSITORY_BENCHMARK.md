@@ -19,7 +19,10 @@ The first live Ollama attempts exhausted the Developer's eight file-tool turns
 without making a change. A 16 turn run showed repeated successful searches
 and reads on More Itertools, and exact-match replacement failures on Boltons;
 neither was a successful repair. A new `replace_line` tool and focused prompts
-now address those observed issues. Check the newest `pinned-repository-benchmark`
+address those observed issues. The next trial also failed because the local model
+repeated searches instead of editing. A local trace then revealed a JSON tool
+call embedded in explanatory text; the adapter now extracts the first such call
+and normalizes it in conversation history. Check the newest `pinned-repository-benchmark`
 GitHub Actions run and its per-case `ollama-repair-*` artifacts for current
 live outcomes. These requests identify the affected function and suggest a
 numbered-line edit, so passing them would show guided repair, not blind diagnosis.

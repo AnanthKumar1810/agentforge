@@ -3,6 +3,7 @@
 from __future__ import annotations
 import asyncio
 import json
+import re
 from typing import Any
 from urllib.request import Request, build_opener, ProxyHandler
 from urllib.parse import urlsplit
@@ -160,19 +161,23 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             raise RuntimeError("Ollama returned invalid or excessive tool calls")
         if not calls and workspace is not None:
             content = str(message.get("content", "")).strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-            try:
-                candidate = json.loads(content)
+            snippets = [content] + re.findall(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.DOTALL | re.IGNORECASE)
+            for snippet in snippets:
+                try:
+                    candidate = json.loads(snippet)
+                except json.JSONDecodeError:
+                    continue
                 if isinstance(candidate, dict) and candidate.get("name") in {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}:
                     calls = [{"function": candidate}]
-            except json.JSONDecodeError:
-                pass
+                    break
         if not calls:
             return str(message.get("content", ""))
         if workspace is None:
             raise RuntimeError("Ollama requested tools for an agent without a workspace")
-        messages.append(message)
+        # Convert a JSON text fallback into a structured tool call in history;
+        # otherwise some small models copy the same JSON request repeatedly.
+        messages.append(message if message.get("tool_calls") else
+                        {"role": "assistant", "content": "", "tool_calls": calls})
         batch_changed = False
         batch_write = False
         batch_error = False
@@ -247,4 +252,5 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
     raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files; "
                        "tool trace: " + ", ".join(tool_trace[:32]))
+
 

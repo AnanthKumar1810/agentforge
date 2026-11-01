@@ -46,16 +46,24 @@ def test_ollama_direct_tool_call(tmp_path, monkeypatch):
 
 def test_ollama_text_json_tool_call(tmp_path, monkeypatch):
     import agentforge.agents as module
+    observed = []
     replies = [
         {"message": {"role": "assistant", "content":
                      '```json\n{"name":"write_file","arguments":{"path":"sample.py","content":"def value(): return 2"}}\n```'}},
         {"message": {"role": "assistant", "content": "Done."}},
     ]
-    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    def chat(endpoint, payload):
+        import copy
+        observed.append(copy.deepcopy(payload))
+        return replies.pop(0)
+
+    monkeypatch.setattr(module, "_ollama_chat", chat)
     result = asyncio.run(run_agent("Developer", "instructions", "Fix value",
                                    tools=[Workspace(tmp_path)], provider="ollama"))
     assert result == "Done."
     assert "return 2" in (tmp_path / "sample.py").read_text()
+    assert observed[1]["messages"][-2]["content"] == ""
+    assert observed[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "write_file"
 
 
 def test_repeated_ollama_write_finishes_without_loop(tmp_path, monkeypatch):
@@ -220,3 +228,32 @@ def test_ollama_endpoint_rejects_credentials_and_query(tmp_path, monkeypatch):
     for base in ["http://user:secret@localhost:11434/v1/", "http://localhost:11434/v1/?x=1"]:
         with pytest.raises(ValueError, match="local"):
             asyncio.run(run_agent("Developer", "", "", provider="ollama", ollama_base_url=base))
+
+
+def test_fenced_tool_request_in_explanation_executes_first_call(tmp_path, monkeypatch):
+    import copy
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        {"message": {"role": "assistant", "content":
+             "Inspect:\n```json\n"
+             '{"name":"search_files","arguments":{"query":"value","path":"sample.py"}}'
+             "\n```\nThen edit:\n```json\n"
+             '{"name":"replace_line","arguments":{"path":"sample.py","line":1,"new":"value = 2"}}'
+             "\n```"}},
+        {"message": {"role": "assistant", "content":
+             '{"name":"replace_line","arguments":{"path":"sample.py","line":1,"new":"value = 2"}}'}},
+        {"message": {"role": "assistant", "content": "Fixed."}},
+    ]
+    seen = []
+
+    def chat(endpoint, payload):
+        seen.append(copy.deepcopy(payload))
+        return replies.pop(0)
+
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                 provider="ollama")) == "Fixed."
+    assert seen[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "search_files"
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+

@@ -37,6 +37,7 @@ def test_bounded_read_search_and_exact_replacement(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "workspace", max_file_bytes=1000)
     ws.write_text("src/module.py", "def value():\n    return 0\n")
     assert "src/module.py:2:     return 0" in ws.search_files("return 0")
+    assert "src/module.py:1: def value():" in ws.search_files("value()", "src/module.py")
     assert ws.read_lines("src/module.py", 2, 2) == "    return 0\n"
     ws.replace_text("src/module.py", "return 0", "return 2")
     assert ws.read_text("src/module.py").endswith("return 2\n")
