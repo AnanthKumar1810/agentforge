@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [boltons-clamp, more-itertools-take]
+        case: [boltons-clamp, more-itertools-take, strif-id-encoding, splitzip-parse-size, semver-compare]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,9 +52,9 @@ jobs:
           done
           cat "$RUNNER_TEMP/ollama.log"
           exit 1
-      - run: ollama pull qwen2.5-coder:7b
+      - run: ollama pull qwen2.5-coder:3b
       - name: Run isolated repair benchmark
-        run: python -m benchmarks.repository_mutations --model qwen2.5-coder:7b --case "${{ matrix.case }}" --output ".agentforge-data/benchmark/${{ matrix.case }}"
+        run: python -m benchmarks.repository_mutations --model qwen2.5-coder:3b --fast --case "${{ matrix.case }}" --output ".agentforge-data/benchmark/${{ matrix.case }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

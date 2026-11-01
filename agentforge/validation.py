@@ -62,7 +62,7 @@ def _docker_command(root: Path, arguments: list[str]) -> tuple[list[str], str]:
         "--security-opt=no-new-privileges", "--pids-limit=256", "--memory=512m", "--cpus=1",
         "--user=65534:65534", "--tmpfs=/tmp:rw,nosuid,size=64m",
         "--mount", f"type=bind,source={root},target=/workspace,readonly",
-        "--workdir=/workspace", "--env=PYTHONPATH=/workspace",
+        "--workdir=/workspace", "--env=PYTHONPATH=/workspace:/workspace/src",
         "--env=PYTHONDONTWRITEBYTECODE=1", "--env=PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
         "agentforge-validator:py313", "python", *arguments,
     ], name)

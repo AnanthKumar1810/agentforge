@@ -8,10 +8,12 @@ import json
 from pathlib import Path
 import subprocess
 
+from agentforge.agents import run_agent
 from agentforge.config import Settings
-from agentforge.engine import AgentForgeEngine
-from agentforge.source import import_source
+from agentforge.engine import DEVELOPER, AgentForgeEngine
+from agentforge.source import changed_files, import_source, snapshot_bytes
 from agentforge.validation import validate_workspace
+from agentforge.workspace import Workspace
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,29 @@ CASES = (
         "more_itertools/recipes.py to inspect the whole function; then use "
         "replace_line for its return statement. Do not edit tests.",
     ),
+    Case(
+        "strif-id-encoding", "https://github.com/jlevy/strif.git",
+        "f66ba7e7921130d8bd4c3a2ad3f7535845d55343", "src/strif/strif.py",
+        "n, remainder = divmod(n, 36)", "n, remainder = divmod(n, 10)",
+        "Fix base36_encode() so it correctly encodes all integers using its 36-character alphabet. "
+        "Inspect the function and its maintained tests; make the smallest source-only change. Do not edit tests.",
+    ),
+    Case(
+        "splitzip-parse-size", "https://github.com/twwat/splitzip.git",
+        "e1aa9ef81cbf26b0ec8ab24b9e3a44c830d93f6a", "src/splitzip/utils.py",
+        "return size", "return size + 1",
+        "Fix parse_size() so an integer input is returned unchanged in bytes, as its documented contract and "
+        "maintained tests require. Make the smallest source-only change. Do not edit tests.",
+    ),
+    Case(
+        "semver-compare", "https://github.com/python-semver/python-semver.git",
+        "f3c7138120d7f49e190bd7c555c6e7eb155b482d", "src/semver/_deprecated.py",
+        "return Version.parse(ver1).compare(ver2)", "return Version.parse(ver1).compare(ver1)",
+        "Fix compare(ver1, ver2) so its return value reports the ordering of ver1 relative to ver2, as its "
+        "documented contract and maintained tests require. Make the smallest source-only change. Do not edit tests.",
+    ),
 )
+
 
 
 def checkout(case: Case, path: Path) -> None:
@@ -75,7 +99,7 @@ def prepare(case: Case, checkout_dir: Path, root: Path) -> tuple[Path, Path]:
     return baseline, mutant
 
 
-async def run(model: str | None, output: Path, selected_case: str | None = None) -> int:
+async def run(model: str | None, output: Path, selected_case: str | None = None, fast: bool = False) -> int:
     output.mkdir(parents=True, exist_ok=True)
     results = []
     for case in CASES:
@@ -93,20 +117,44 @@ async def run(model: str | None, output: Path, selected_case: str | None = None)
             "mutant": mutant_check.model_dump(mode="json"),
         }
         if model and baseline_check.status == "verified" and mutant_check.status == "failed":
-            settings = Settings(
-                model, output / "runs" / case.name, 1, 180, 500_000, "unused",
-                provider="ollama", validator="docker",
-            )
-            report = await AgentForgeEngine(settings).run(
-                case.request, source_repo=str(mutant), allow_local_execution=True,
-            )
-            item["repair"] = {
-                "status": report.status, "run_id": report.run_id,
-                "error": report.error,
-                "validation": report.validation.model_dump(mode="json"),
-                "artifacts": report.artifacts, "changed_files":
-                    report.attempts[-1]["changed_files"] if report.attempts else [],
-            }
+            settings = Settings(model, output / "runs" / case.name, 0, 180, 500_000, "unused",
+                                provider="ollama", validator="docker")
+            if fast:
+                workspace_path = settings.data_dir / "workspace"
+                import_source(str(mutant), workspace_path)
+                workspace = Workspace(workspace_path, max_file_bytes=settings.max_file_bytes)
+                before = snapshot_bytes(workspace_path)
+                response = await run_agent(
+                    "Developer", DEVELOPER,
+                    f"USER REQUEST\\n{case.request}\\n\\nTarget file: {case.file}\\n"
+                    "Inspect the relevant implementation and tests with workspace tools, then make the smallest "
+                    "source-only repair. Do not change tests, configuration, or dependencies. Do not execute commands.",
+                    tools=[workspace], model=model, provider="ollama",
+                    ollama_base_url=settings.ollama_base_url,
+                )
+                changed = changed_files(before, snapshot_bytes(workspace_path))
+                source_only = bool(changed) and all(path == case.file for path in changed)
+                validation = (validate_workspace(workspace_path, timeout_seconds=180, runner="docker")
+                              if source_only else None)
+                item["repair"] = {
+                    "status": "passed" if validation and validation.status == "verified" else "failed",
+                    "response": response,
+                    "changed_files": changed,
+                    "source_only": source_only,
+                    "validation": validation.model_dump(mode="json") if validation else None,
+                    "error": None if source_only else "No source edit or changes outside the allowed target file",
+                }
+            else:
+                report = await AgentForgeEngine(settings).run(
+                    case.request, source_repo=str(mutant), allow_local_execution=True,
+                )
+                item["repair"] = {
+                    "status": report.status, "run_id": report.run_id,
+                    "error": report.error,
+                    "validation": report.validation.model_dump(mode="json"),
+                    "artifacts": report.artifacts, "changed_files":
+                        report.attempts[-1]["changed_files"] if report.attempts else [],
+                }
         results.append(item)
         (output / "results.json").write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({
@@ -126,9 +174,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, default=Path(".agentforge-data/benchmark"))
     parser.add_argument("--model", help="Run real Ollama repairs after baseline/mutant validation")
+    parser.add_argument("--fast", action="store_true", help="Use one focused Developer pass, then Docker-validate the full repository")
     parser.add_argument("--case", choices=[case.name for case in CASES], help="Run just one pinned case")
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(run(args.model, args.output.resolve(), args.case)))
+    raise SystemExit(asyncio.run(run(args.model, args.output.resolve(), args.case, args.fast)))
 
 
 if __name__ == "__main__":
