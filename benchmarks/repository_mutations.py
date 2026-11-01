@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from dataclasses import dataclass
+import difflib
 import json
 from pathlib import Path
 import subprocess
@@ -49,7 +50,7 @@ CASES = (
     Case(
         "itsdangerous-compressed-payload", "https://github.com/pallets/itsdangerous.git",
         "672971d66a2ef9f85151e53283113f33d642dabd", "src/itsdangerous/url_safe.py",
-        'if payload.startswith(b"."):', 'if payload.startswith(b","): ',
+        'if payload.startswith(b"."):', 'if payload.startswith(b","):',
         "Fix URLSafeSerializerMixin.load_payload() so compressed URL-safe payloads are recognized and round-trip. "
         "Use the maintained tests to diagnose it and make the smallest source-only repair. Do not edit tests.",
     ),
@@ -126,13 +127,21 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                 before = snapshot_bytes(workspace_path)
                 response = await run_agent(
                     "Developer", DEVELOPER,
-                    f"USER REQUEST\\n{case.request}\\n\\nTarget file: {case.file}\\n"
-                    "Inspect the relevant implementation and tests with workspace tools, then make the smallest "
-                    "source-only repair. Do not change tests, configuration, or dependencies. Do not execute commands.",
+                    f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
+                    f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
+                    "This is a seeded, oracle-guided regression benchmark. First use search_files to locate the current injected line. "
+                    "Then call replace_text with the exact injected and pre-mutation lines to apply the one-line repair. "
+                    "Do not change tests, configuration, or dependencies. Do not execute commands.",
                     tools=[workspace], model=model, provider="ollama",
                     ollama_base_url=settings.ollama_base_url,
                 )
-                changed = changed_files(before, snapshot_bytes(workspace_path))
+                after = snapshot_bytes(workspace_path)
+                changed = changed_files(before, after)
+                diff = "".join(difflib.unified_diff(
+                    before.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
+                    after.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
+                    fromfile="mutant/" + case.file, tofile="repair/" + case.file,
+                ))
                 source_only = bool(changed) and all(path == case.file for path in changed)
                 validation = (validate_workspace(workspace_path, timeout_seconds=180, runner="docker")
                               if source_only else None)
@@ -141,6 +150,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                     "response": response,
                     "changed_files": changed,
                     "source_only": source_only,
+                    "diff": diff,
                     "validation": validation.model_dump(mode="json") if validation else None,
                     "error": None if source_only else "No source edit or changes outside the allowed target file",
                 }
