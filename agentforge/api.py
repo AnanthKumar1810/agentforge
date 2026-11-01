@@ -20,6 +20,16 @@ _jobs: dict[str, dict] = {}
 _job_lock = Lock()
 
 
+def _report_path(run_id: str) -> Path | None:
+    """Find a persisted report in either normal or live-run storage."""
+    data_dir = Settings.from_env().data_dir
+    for root in (data_dir / "runs", data_dir / "live" / "runs"):
+        path = (root / run_id / "artifacts" / "report.json").resolve()
+        if path.is_file():
+            return path
+    return None
+
+
 @app.get("/", include_in_schema=False)
 def dashboard() -> FileResponse:
     return FileResponse(Path(__file__).parent / "static" / "index.html")
@@ -107,8 +117,8 @@ async def create_run(payload: RunRequest) -> RunReport:
 async def get_run(run_id: str) -> RunReport:
     if not re.fullmatch(r"[0-9a-f]{32}", run_id):
         raise HTTPException(status_code=422, detail="Invalid run ID")
-    path = (Settings.from_env().data_dir / "runs" / run_id / "artifacts" / "report.json").resolve()
-    if not path.is_file():
+    path = _report_path(run_id)
+    if path is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return RunReport.model_validate_json(path.read_text(encoding="utf-8"))
 
@@ -116,10 +126,11 @@ async def get_run(run_id: str) -> RunReport:
 @app.get("/history", dependencies=[Depends(require_token)])
 def run_history() -> list[dict]:
     """List saved reports, including runs from previous server processes."""
-    root = Settings.from_env().data_dir / "runs"
-    if not root.is_dir():
-        return []
-    paths = (item / "artifacts" / "report.json" for item in root.iterdir()
+    data_dir = Settings.from_env().data_dir
+    roots = (data_dir / "runs", data_dir / "live" / "runs")
+    paths = (item / "artifacts" / "report.json"
+             for root in roots if root.is_dir()
+             for item in root.iterdir()
              if item.is_dir() and re.fullmatch(r"[0-9a-f]{32}", item.name))
     recent = sorted((path for path in paths if path.is_file()),
                     key=lambda path: path.stat().st_mtime, reverse=True)[:50]
@@ -140,7 +151,9 @@ def run_history() -> list[dict]:
 def download_report(run_id: str) -> FileResponse:
     if not re.fullmatch(r"[0-9a-f]{32}", run_id):
         raise HTTPException(status_code=422, detail="Invalid run ID")
-    path = Settings.from_env().data_dir / "runs" / run_id / "artifacts" / "report.md"
-    if not path.is_file():
+    json_path = _report_path(run_id)
+    path = json_path.with_name("report.md") if json_path else None
+    if path is None or not path.is_file():
         raise HTTPException(status_code=404, detail="Report not found")
     return FileResponse(path, media_type="text/markdown", filename=f"agentforge-{run_id}.md")
+
