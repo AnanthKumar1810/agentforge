@@ -61,11 +61,11 @@ CASES = (
         "as the maintained tests require. Make the smallest source-only repair. Do not edit tests.",
     ),
     Case(
-        "click-wrap-text", "https://github.com/pallets/click.git",
-        "2247b35ea1c47c727d7a06e51fa280e12a863ff6", "src/click/formatting.py",
-        "if not preserve_paragraphs:", "if preserve_paragraphs:",
-        "Fix wrap_text() so it uses the simple wrapping path unless preserve_paragraphs is requested, and uses the "
-        "paragraph-aware path when requested. Follow the maintained tests and make the smallest source-only repair. "
+        "markupsafe-escape-proxy", "https://github.com/pallets/markupsafe.git",
+        "4e111271b1494995708a9e878a10829b5e10c7ba", "src/markupsafe/__init__.py",
+        "if type(s) is str:", "if isinstance(s, str):",
+        "Fix escape() so it handles plain strings efficiently while still safely handling proxy objects that claim "
+        "to be strings through __class__. Follow the maintained tests and make the smallest source-only repair. "
         "Do not edit tests.",
     ),
 )
