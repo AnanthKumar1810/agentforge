@@ -175,7 +175,7 @@ Selected tests run first, then the full pytest suite is the final gate. Runs wit
 
 ## Current scope
 
-The CLI/API, repository import, restricted file tools, bounded repair, and reports form a local prototype. The suite exercises a deterministic failed-test repair with fake agent responses. A real Ollama run on a small maintained fixture passed syntax and pytest after the model edited the copied source. See `docs/STATUS_2026-10-31.md` for exact evidence and remaining blockers. The dashboard, queue, GitHub webhooks/draft PRs, and deployment are not in this checkout. Do not claim production isolation or autonomous PR publication.
+The CLI/API, repository import, restricted file tools, bounded repair, and reports form a local prototype. The suite exercises a deterministic failed-test repair with fake agent responses. A real Ollama run on a small maintained fixture passed syntax and pytest after the model edited the copied source. See `docs/STATUS_2026-10-31.md` for exact evidence and remaining blockers. The localhost dashboard is implemented, but its job queue is in-memory; GitHub webhooks, draft PRs, and deployment are not implemented. Do not claim production isolation or autonomous PR publication.
 
 # Local prompt dashboard
 
