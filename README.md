@@ -200,3 +200,11 @@ you trust. The default Docker validator remains the choice for unknown code.
 
 
 The browser demo uses `fast_mode`: it skips the separate model planning, tester, and reviewer calls, then performs the actual model edit and the same deterministic validation and report. This reduces waiting time but does not guarantee a repair will pass. Ollama requests have a six-minute per-call timeout to accommodate a slow first load. Prewarm the model before a timed demo.
+
+The local dashboard's **Run history** lists up to 50 saved reports from
+`.agentforge-data/runs/`. Select **View evidence** to see the recorded diff and
+checks again, or **Download report** for a Markdown copy. History is served from
+saved files and remains available after a server restart. The API token is still
+required to list and download reports. Reports from a different AgentForge data
+folder can be copied into this folder under `runs/<run-id>/artifacts/` to include
+them in the history.

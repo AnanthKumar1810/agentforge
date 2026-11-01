@@ -111,3 +111,36 @@ async def get_run(run_id: str) -> RunReport:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Run not found")
     return RunReport.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+@app.get("/history", dependencies=[Depends(require_token)])
+def run_history() -> list[dict]:
+    """List saved reports, including runs from previous server processes."""
+    root = Settings.from_env().data_dir / "runs"
+    if not root.is_dir():
+        return []
+    paths = (item / "artifacts" / "report.json" for item in root.iterdir()
+             if item.is_dir() and re.fullmatch(r"[0-9a-f]{32}", item.name))
+    recent = sorted((path for path in paths if path.is_file()),
+                    key=lambda path: path.stat().st_mtime, reverse=True)[:50]
+    result = []
+    for path in recent:
+        try:
+            report = RunReport.model_validate_json(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        result.append({"run_id": path.parent.parent.name, "request": report.request,
+                       "status": report.status, "validation": report.validation.status,
+                       "finished_at": report.finished_at.isoformat(),
+                       "attempts": len(report.attempts), "model": report.metadata.get("model", "unknown")})
+    return result
+
+
+@app.get("/runs/{run_id}/report.md", dependencies=[Depends(require_token)])
+def download_report(run_id: str) -> FileResponse:
+    if not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise HTTPException(status_code=422, detail="Invalid run ID")
+    path = Settings.from_env().data_dir / "runs" / run_id / "artifacts" / "report.md"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Report not found")
+    return FileResponse(path, media_type="text/markdown", filename=f"agentforge-{run_id}.md")

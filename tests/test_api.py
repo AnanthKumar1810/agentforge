@@ -49,3 +49,30 @@ def test_dashboard_submits_and_displays_job_result(monkeypatch, tmp_path):
         time.sleep(.01)
     assert result["status"] == "completed"
     assert result["report"]["validation"]["status"] == "verified"
+
+
+def test_saved_run_history_and_report_download(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from agentforge.models import RunReport, ValidationSummary
+    from agentforge.reporting import write_reports
+    monkeypatch.setenv("AGENTFORGE_API_TOKEN", "history-token")
+    monkeypatch.setenv("AGENTFORGE_DATA_DIR", str(tmp_path))
+    now = datetime.now(timezone.utc)
+    run_id = "b" * 32
+    report = RunReport(run_id=run_id, request="Fix sample.value()", status="passed",
+                       started_at=now, finished_at=now, workspace=str(tmp_path),
+                       validation=ValidationSummary(passed=True, status="verified"),
+                       metadata={"model": "qwen2.5-coder:7b"})
+    write_reports(report, tmp_path / "runs" / run_id / "artifacts")
+    client = TestClient(app)
+    assert client.get("/history").status_code == 401
+    auth = {"Authorization": "Bearer history-token"}
+    listing = client.get("/history", headers=auth)
+    assert listing.status_code == 200
+    assert listing.json()[0]["run_id"] == run_id
+    assert listing.json()[0]["validation"] == "verified"
+    assert client.get(f"/runs/{run_id}", headers=auth).json()["request"] == "Fix sample.value()"
+    download = client.get(f"/runs/{run_id}/report.md", headers=auth)
+    assert download.status_code == 200
+    assert "AgentForge run report" in download.text
+    assert client.get("/runs/../report.md", headers=auth).status_code != 200
