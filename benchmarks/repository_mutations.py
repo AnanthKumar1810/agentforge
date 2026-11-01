@@ -37,7 +37,7 @@ class SeededRepairWorkspace(Workspace):
         self._target = target
         self._injected = injected
         self._expected = expected
-        self.ollama_tool_allowlist = {"replace_text"}
+        self.ollama_tool_allowlist = {"read_file", "read_lines", "search_files", "replace_text"}
 
     def replace_line(self, relative_path: str, line: int, new: str) -> str:
         raise WorkspaceError("Use replace_text for this benchmark's exact seeded line.")
