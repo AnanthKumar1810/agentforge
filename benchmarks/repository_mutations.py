@@ -160,7 +160,8 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
         print(json.dumps({
             "name": case.name, "baseline": baseline_check.status, "mutant": mutant_check.status,
             "repair": item.get("repair", {}).get("status", "not run"),
-            "error": item.get("repair", {}).get("error"),\n            "baseline_issues": baseline_check.issues[:2], "mutant_issues": mutant_check.issues[:2],
+            "error": item.get("repair", {}).get("error"),
+            "baseline_issues": baseline_check.issues[:2], "mutant_issues": mutant_check.issues[:2],
         }), flush=True)
     return 0 if all(
         item["baseline"]["status"] == "verified"
