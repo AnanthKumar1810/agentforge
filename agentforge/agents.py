@@ -146,13 +146,18 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     messages: list[dict] = [{"role": "system", "content": instructions},
                             {"role": "user", "content": prompt}]
     workspace = tools[0] if tools and isinstance(tools[0], Workspace) else None
+    allowed_tool_names = getattr(workspace, "ollama_tool_allowlist", None)
+    available_tools = [
+        tool for tool in _OLLAMA_TOOLS
+        if allowed_tool_names is None or tool["function"]["name"] in allowed_tool_names
+    ]
     applied_writes: dict[str, str] = {}
     tool_trace: list[str] = []
     for _ in range(16):
         payload = {"model": model, "messages": messages, "stream": False,
                    "options": {"temperature": 0.1, "num_predict": 1200}}
-        if workspace is not None:
-            payload["tools"] = _OLLAMA_TOOLS
+        if workspace is not None and available_tools:
+            payload["tools"] = available_tools
         response = await asyncio.to_thread(_ollama_chat, endpoint, payload)
         if not isinstance(response, dict) or not isinstance(response.get("message"), dict):
             raise RuntimeError("Ollama returned an invalid message envelope")
@@ -168,7 +173,10 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     candidate = json.loads(snippet)
                 except json.JSONDecodeError:
                     continue
-                if isinstance(candidate, dict) and candidate.get("name") in {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}:
+                allowed = {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}
+                if allowed_tool_names is not None:
+                    allowed &= allowed_tool_names
+                if isinstance(candidate, dict) and candidate.get("name") in allowed:
                     calls = [{"function": candidate}]
                     break
         if not calls:
