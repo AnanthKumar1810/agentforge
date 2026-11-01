@@ -47,28 +47,28 @@ CASES = (
         "replace_line for its return statement. Do not edit tests.",
     ),
     Case(
-        "strif-id-encoding", "https://github.com/jlevy/strif.git",
-        "f66ba7e7921130d8bd4c3a2ad3f7535845d55343", "src/strif/strif.py",
-        "n, remainder = divmod(n, 36)", "n, remainder = divmod(n, 10)",
-        "Fix base36_encode() so it correctly encodes all integers using its 36-character alphabet. "
-        "Inspect the function and its maintained tests; make the smallest source-only change. Do not edit tests.",
+        "itsdangerous-compressed-payload", "https://github.com/pallets/itsdangerous.git",
+        "672971d66a2ef9f85151e53283113f33d642dabd", "src/itsdangerous/url_safe.py",
+        'if payload.startswith(b"."):', 'if payload.startswith(b","): ',
+        "Fix URLSafeSerializerMixin.load_payload() so compressed URL-safe payloads are recognized and round-trip. "
+        "Use the maintained tests to diagnose it and make the smallest source-only repair. Do not edit tests.",
     ),
     Case(
-        "splitzip-parse-size", "https://github.com/twwat/splitzip.git",
-        "e1aa9ef81cbf26b0ec8ab24b9e3a44c830d93f6a", "src/splitzip/utils.py",
-        "return size", "return size + 1",
-        "Fix parse_size() so an integer input is returned unchanged in bytes, as its documented contract and "
-        "maintained tests require. Make the smallest source-only change. Do not edit tests.",
+        "iniconfig-key-whitespace", "https://github.com/pytest-dev/iniconfig.git",
+        "a9e0ad14bcd0d9d3b68d2b699ce38399cbe64fdd", "src/iniconfig/_parse.py",
+        "key_name = name.strip()", "key_name = name",
+        "Fix INI parsing so leading and trailing whitespace around key names is stripped, including Unicode whitespace, "
+        "as the maintained tests require. Make the smallest source-only repair. Do not edit tests.",
     ),
     Case(
-        "semver-compare", "https://github.com/python-semver/python-semver.git",
-        "f3c7138120d7f49e190bd7c555c6e7eb155b482d", "src/semver/_deprecated.py",
-        "return Version.parse(ver1).compare(ver2)", "return Version.parse(ver1).compare(ver1)",
-        "Fix compare(ver1, ver2) so its return value reports the ordering of ver1 relative to ver2, as its "
-        "documented contract and maintained tests require. Make the smallest source-only change. Do not edit tests.",
+        "click-wrap-text", "https://github.com/pallets/click.git",
+        "2247b35ea1c47c727d7a06e51fa280e12a863ff6", "src/click/formatting.py",
+        "if not preserve_paragraphs:", "if preserve_paragraphs:",
+        "Fix wrap_text() so it uses the simple wrapping path unless preserve_paragraphs is requested, and uses the "
+        "paragraph-aware path when requested. Follow the maintained tests and make the smallest source-only repair. "
+        "Do not edit tests.",
     ),
 )
-
 
 
 def checkout(case: Case, path: Path) -> None:
@@ -160,7 +160,7 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
         print(json.dumps({
             "name": case.name, "baseline": baseline_check.status, "mutant": mutant_check.status,
             "repair": item.get("repair", {}).get("status", "not run"),
-            "error": item.get("repair", {}).get("error"),
+            "error": item.get("repair", {}).get("error"),\n            "baseline_issues": baseline_check.issues[:2], "mutant_issues": mutant_check.issues[:2],
         }), flush=True)
     return 0 if all(
         item["baseline"]["status"] == "verified"

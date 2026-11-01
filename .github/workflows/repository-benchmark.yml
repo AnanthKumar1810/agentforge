@@ -33,7 +33,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        case: [boltons-clamp, more-itertools-take, strif-id-encoding, splitzip-parse-size, semver-compare]
+        case: [boltons-clamp, more-itertools-take, itsdangerous-compressed-payload, iniconfig-key-whitespace, click-wrap-text]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
