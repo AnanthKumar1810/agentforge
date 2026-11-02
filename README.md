@@ -221,3 +221,34 @@ saved files and remains available after a server restart. The API token is still
 required to list and download reports. Reports from a different AgentForge data
 folder can be copied into this folder under `runs/<run-id>/artifacts/` to include
 them in the history.
+
+## AgentX PS-05 issue-to-draft-PR workflow
+
+The `ps05` command is an opt-in competition workflow. It reads a GitHub issue,
+checks out the repository's default branch, requires a failing pytest baseline
+inside Docker, asks AgentForge to make a bounded source edit and add a regression
+test, then verifies the full suite. The new regression test must also fail
+against the original code. Only then does it create a **draft** pull request with
+the changed files and validation summary. AgentForge never merges a PR.
+
+Prerequisites: Docker with the `agentforge-validator:py313` image, a local model
+or configured hosted provider, and `GITHUB_TOKEN` with repository Contents and
+Pull requests write permissions. The repository must have an existing failing
+pytest test. Set `AGENTFORGE_VALIDATOR=docker`; local validation is rejected.
+
+```powershell
+docker build -t agentforge-validator:py313 validator
+$env:AGENTFORGE_PROVIDER = "ollama"
+$env:AGENTFORGE_MODEL = "qwen2.5-coder:7b"
+$env:AGENTFORGE_VALIDATOR = "docker"
+$env:GITHUB_TOKEN = "<token with repository write permissions>"
+agentforge ps05 https://github.com/OWNER/REPO/issues/123 --repro-test tests/test_bug.py
+```
+
+For a private repository, supply `--source-repo PATH` to a clean local checkout
+at the current default-branch commit. Without it, the command clones a public
+GitHub repository. If reproduction or any verification gate fails, it writes a
+run report when the engine ran and creates no PR. This workflow has unit tests
+with mocked GitHub responses; a live end-to-end GitHub PR run is still needed
+before claiming that integration as demonstrated.
+

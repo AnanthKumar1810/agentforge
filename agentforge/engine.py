@@ -48,6 +48,7 @@ class AgentForgeEngine:
         test_manifest: str | None = None, generate_tests: bool = False,
         allow_local_execution: bool = False,
         fast_mode: bool = False,
+        allow_new_tests: bool = False,
     ) -> RunReport:
         if not request or not request.strip():
             raise ValueError("request cannot be empty")
@@ -61,7 +62,8 @@ class AgentForgeEngine:
         started = datetime.now(timezone.utc)
         run_dir = (self.settings.data_dir / "runs" / run_id).resolve()
         workspace_path = run_dir / "workspace"
-        workspace = Workspace(workspace_path, max_file_bytes=self.settings.max_file_bytes)
+        workspace = Workspace(workspace_path, max_file_bytes=self.settings.max_file_bytes,
+                              allow_new_tests=allow_new_tests)
         output_dir = run_dir / "artifacts"
         plan, review, changes_summary, error = "", "", "", None
         optional_context: dict[str, str] = {}
@@ -152,4 +154,5 @@ class AgentForgeEngine:
         )
         report.artifacts = write_reports(report, output_dir)
         return report
+
 
