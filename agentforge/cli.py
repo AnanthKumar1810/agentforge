@@ -21,6 +21,10 @@ def make_parser() -> argparse.ArgumentParser:
     build.add_argument("--crewai", action="store_true")
     build.add_argument("--beeai", action="store_true")
     build.add_argument("--max-repair-rounds", type=int, choices=range(0, 6))
+    issue = sub.add_parser("ps05", help="turn a GitHub issue into a verified draft PR")
+    issue.add_argument("issue_url", help="https://github.com/owner/repo/issues/123")
+    issue.add_argument("--source-repo", help="clean local checkout at the repository's default-branch HEAD")
+    issue.add_argument("--repro-test", help="existing failing test file under tests/")
     api = sub.add_parser("api", help="start the FastAPI service")
     api.add_argument("--host", default="127.0.0.1"); api.add_argument("--port", type=int, default=8000)
     a2a = sub.add_parser("a2a", help="start the A2A-style JSON-RPC facade")
@@ -41,6 +45,12 @@ def main() -> None:
     try:
         if args.command == "build":
             raise SystemExit(asyncio.run(run_build(args)))
+        if args.command == "ps05":
+            from agentforge.ps05 import run_issue
+            result = asyncio.run(run_issue(args.issue_url, source_repo=args.source_repo,
+                                           repro_test=args.repro_test))
+            print(json.dumps(result, indent=2, ensure_ascii=False))
+            raise SystemExit(0 if result["status"] == "draft_pr_created" else 1)
         if args.command == "api":
             import uvicorn
             uvicorn.run("agentforge.api:app", host=args.host, port=args.port, reload=False); return
@@ -62,3 +72,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

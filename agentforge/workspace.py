@@ -20,10 +20,12 @@ PROTECTED_FILES = {"conftest.py", "pytest.ini", "tox.ini", "test_manifest.json",
                    "pyproject.toml", "setup.cfg", "setup.py", "sitecustomize.py", "usercustomize.py"}
 
 class Workspace:
-    def __init__(self, root: Path, *, max_file_bytes: int | None = None) -> None:
+    def __init__(self, root: Path, *, max_file_bytes: int | None = None,
+                 allow_new_tests: bool = False) -> None:
         self.root = root.expanduser().resolve()
         self.root.mkdir(parents=True, exist_ok=True)
         self.max_file_bytes = max_file_bytes if max_file_bytes is not None else Settings.from_env().max_file_bytes
+        self.allow_new_tests = allow_new_tests
 
     def resolve(self, relative_path: str) -> Path:
         if not relative_path or not relative_path.strip():
@@ -107,11 +109,17 @@ class Workspace:
         target = self.resolve(relative_path)
         parts = target.relative_to(self.root).parts
         name = target.name.lower()
-        if (any(part.lower() in {"tests", ".git", ".github", ".venv"} for part in parts)
+        new_regression_test = (self.allow_new_tests and not target.exists() and len(parts) >= 2
+                               and parts[0].lower() == "tests"
+                               and name.startswith("test_") and name.endswith(".py")
+                               and all(part.lower() not in {".git", ".github", ".venv"}
+                                       for part in parts))
+        if (not new_regression_test and (
+                any(part.lower() in {"tests", ".git", ".github", ".venv"} for part in parts)
                 or self._sensitive(target) or name in PROTECTED_FILES
                 or name.startswith("requirements") and name.endswith(".txt")
                 or name.startswith("test_") and name.endswith(".py")
-                or name.endswith("_test.py")):
+                or name.endswith("_test.py"))):
             raise WorkspaceError("Protected test, configuration, or credential path cannot be edited by the agent")
         payload = content.encode("utf-8")
         if len(payload) > self.max_file_bytes:
@@ -157,4 +165,5 @@ class Workspace:
             except OSError:
                 continue
         return snapshot
+
 
