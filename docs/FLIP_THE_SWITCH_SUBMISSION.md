@@ -13,7 +13,7 @@ AgentForge's original repair engine predates the event. The Switch client and ap
 
 ## Reproducible live demo (about 2 minutes)
 
-1. Show a clean demo target with `sample.py` returning `0` and a failing `test_value.py` expecting `2`. Show the failing test.
+1. Use the included `examples/repair_target` fixture. Show `sample.py` returning `0` and its failing `tests/test_sample.py` expecting `2`. Show the failing test.
 2. In a Switch room backed by Mattermost or another supported channel, address AgentForge: `repair: test_value fails; value() must return 2`.
 3. Show AgentForge's posted patch, SHA-256 digest, run ID, and pre-approval tests. Show that `sample.py` still returns `0` in the target.
 4. From a different, unauthorized participant, try `approve <repair-id>` and show it is refused. From the configured reviewer, send `approve <repair-id>`.

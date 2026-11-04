@@ -43,7 +43,7 @@ AgentForge now has a Switch agent client for a team-chat repair workflow. A pers
 
    The bridge URL is the agent bridge, not the Gateway URL. `agentforge switch --check` confirms the bridge health endpoint and local configuration. It does not prove credentials, room membership, or a working model. `agentforge switch` starts the client. The bridge must use HTTPS off localhost. See [Switch agent connection](https://docs.switchagents.ai/switch-rooms/internals/agent-connection) for WebSocket and registration details.
 
-4. In the room, address the AgentForge agent and send `repair: test_value fails; value() should return 2`. Wait for its proposed diff and checks. From the configured reviewer account, address it with `approve <repair-id>` or `reject <repair-id>`. The agent only handles addressed messages in the configured room. It rejects decisions from any other participant.
+4. For the live demo, point `AGENTFORGE_SOURCE_REPO` at the included `examples/repair_target` fixture. In the room, address the AgentForge agent and send `repair: test_sample fails; value() should return 2`. Wait for its proposed diff and checks. From the configured reviewer account, address it with `approve <repair-id>` or `reject <repair-id>`. The agent only handles addressed messages in the configured room. It rejects decisions from any other participant.
 
 ### Reproduce without Switch credentials
 
