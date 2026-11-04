@@ -1,5 +1,60 @@
 # AgentForge
 
+## Flip the Switch: human-approved code repair (November 2026)
+
+AgentForge now has a Switch agent client for a team-chat repair workflow. A person addresses the agent with `repair: <failing test and expected behavior>`. AgentForge copies the configured repository into a private run workspace, proposes and validates a patch there, then posts the exact diff and a SHA-256 digest to the Switch room. The source repository stays untouched until the configured human reviewer addresses the agent with `approve <repair-id>`. `reject <repair-id>` leaves it untouched. Approval verifies that neither the source nor staged patch has changed, applies the reviewed files once, runs the checks again, and posts the diff and test logs. Switch is the chat and authorization boundary; no direct chat-platform bot token is used.
+
+### Set up
+
+1. Install `pip install -e ".[switch,dev]"`. For the default isolated validator, build `docker build -t agentforge-validator:py313 validator` and start Docker. `AGENTFORGE_VALIDATOR=local` executes repository tests on your computer; use it only for a trusted demo fixture.
+2. Follow the [Switch quickstart](https://docs.switchagents.ai/switch-rooms/getting-started) to run a bridge and a Mattermost-backed room, or connect another supported chat channel. Register an always-on custom agent with the [agent protocol](https://docs.switchagents.ai/switch-rooms/internals/agent-protocol), then add it to that room. Registration uses a separate registration key and returns an agent API key once. Keep the key private. The agent should answer only its owner or configured participants.
+
+   Register once with `POST <bridge-url>/agents`, `Authorization: Bearer <registration-key>`, and this JSON body:
+
+   ```json
+   {
+     "name": "agentforge-repair",
+     "description": "Stages code repairs and waits for human approval",
+     "connector_type": "agentforge",
+     "integration_profile": {
+       "connection_model": "always_on",
+       "message_exchange": true,
+       "pre_invocation_mediation": [],
+       "post_invocation_mediation": [],
+       "event_reporting": []
+     }
+   }
+   ```
+
+   Save the returned `id` and `api_key`; the latter is shown only once. Do not register on every launch, because overwriting a registration rotates its key. Add that agent to the room using Switch Console or the room operations.
+3. Set these environment variables (use a private `.env`, never commit it):
+
+   ```text
+   SWITCH_BRIDGE_URL=http://127.0.0.1:8000
+   SWITCH_AGENT_ID=<registered agent id>
+   SWITCH_AGENT_API_KEY=<agent API key>
+   SWITCH_ROOM_ID=<room id>
+   SWITCH_APPROVER_ID=<exact Switch participant id of the human reviewer>
+   AGENTFORGE_SOURCE_REPO=<absolute path to the trusted target repository>
+   AGENTFORGE_SWITCH_STATE_DIR=<absolute path outside that repository>
+   OPENAI_API_KEY=<model provider key, if using OpenAI>
+   AGENTFORGE_VALIDATOR=docker
+   ```
+
+   The bridge URL is the agent bridge, not the Gateway URL. `agentforge switch --check` confirms the bridge health endpoint and local configuration. It does not prove credentials, room membership, or a working model. `agentforge switch` starts the client. The bridge must use HTTPS off localhost. See [Switch agent connection](https://docs.switchagents.ai/switch-rooms/internals/agent-connection) for WebSocket and registration details.
+
+4. In the room, address the AgentForge agent and send `repair: test_value fails; value() should return 2`. Wait for its proposed diff and checks. From the configured reviewer account, address it with `approve <repair-id>` or `reject <repair-id>`. The agent only handles addressed messages in the configured room. It rejects decisions from any other participant.
+
+### Reproduce without Switch credentials
+
+Run `python -m pytest -q -p no:cacheprovider tests/test_switch_repair.py` to exercise the staged patch, unauthorized approval, rejection, source-drift, and replay cases with an offline Switch transport and fake model. Run `python -m examples.demo_repair` for the existing deterministic repair engine demo. These are offline checks, not evidence of a live Switch room. For a recorded hackathon demo, show the real room messages, the source file unchanged before approval, then the approved source diff and post-approval test output.
+
+### Safety boundary
+
+The client requires an exact reviewer participant ID, a matching room, and an addressed approval message. It stores pending decisions on disk, checks file hashes before applying, blocks file deletions and protected test/config paths, and refuses patches too long to show fully in chat. Use a clean, disposable target repository for the live demo. Model-generated tests run only in AgentForge's configured validator; Docker isolation is the default. Do not use local validation on untrusted repositories. The current client handles one process per agent identity; run a single instance to avoid competing room claims.
+
+See [Flip the Switch submission notes](docs/FLIP_THE_SWITCH_SUBMISSION.md) for the demo script, evidence checklist, and submission text.
+
 AgentForge is a reference implementation of an agentic software-engineering system. It deliberately combines deterministic orchestration with specialized AI agents instead of turning the entire application into one uncontrolled autonomous loop.
 
 ## Competition evidence (November 1, 2026)
