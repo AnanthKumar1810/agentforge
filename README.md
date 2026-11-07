@@ -26,7 +26,7 @@ AgentForge now has a Switch agent client for a team-chat repair workflow. A pers
    }
    ```
 
-   Save the returned `id` and `api_key`; the latter is shown only once. Do not register on every launch, because overwriting a registration rotates its key. Add that agent to the room using Switch Console or the room operations.
+   Save the returned `id` and `api_key`; the latter is shown only once. Do not register on every launch, because overwriting a registration rotates its key. Add that agent to the room using Switch Console or the room operations. A new agent may be restricted to its owner by default. Before the live test, have the owner or server admin allow the intended reviewer to address the agent in the demo room. Keep that Switch addressing rule scoped to the room and reviewer; AgentForge separately checks the exact reviewer participant ID before applying a patch. A room invitation alone does not grant permission to address an owner-only agent.
 3. Set these environment variables (use a private `.env`, never commit it):
 
    ```text
