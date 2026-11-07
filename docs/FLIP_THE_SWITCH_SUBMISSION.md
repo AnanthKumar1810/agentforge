@@ -31,3 +31,25 @@ Use a clean, trusted fixture for the video. Do not display API keys or local `.e
 - [ ] Final entry submitted manually by the registered participant before **November 7, 2026, 11:59 PM IST**
 
 Registration was reported complete by the participant. This document does not assert that the Switch account, credentials, demo video, or final entry exist yet. Official event requirements and deadline: [Flip the Switch](https://www.wemakedevs.org/hackathons/switch). Custom agent wire contract: [Switch agent protocol](https://docs.switchagents.ai/switch-rooms/internals/agent-protocol).
+
+## Verified development evidence (November 7, 2026)
+
+- The targeted offline suite passed locally: **35 passed, 1 skipped**. It covers reviewer authorization, rejection, replay, source drift, and reviewable text patches.
+- `python -m examples.demo_repair` passed locally with two attempts and one repair; the original fixture remained unchanged.
+- The existing GitHub Actions `tests` run for PR commit `577f87c` completed successfully. The new Docker validator job must be checked after this update is pushed.
+- The local Docker engine was unavailable during this check. The new Docker test has not yet been claimed as a local pass.
+- No Switch bridge, room, agent API key, or reviewer participant ID was present in this environment. No live Switch message flow or video is claimed.
+
+## Portal submission copy
+
+**Title:** AgentForge — human-approved code repair through Switch
+
+**Track:** Best Business Workflow
+
+**Description:** AgentForge brings a software repair agent into a Switch-connected team room. A teammate reports a failing test; the agent stages a candidate patch and posts the complete diff, hash, and test evidence without touching the source. A named human reviewer approves or rejects in the room. Approval checks that the source and staged files still match what was reviewed, applies the patch once, and posts fresh validation results. The project includes a reproducible fixture, offline approval tests, and a Docker validator check. The existing repair engine predates the event; the Switch client and human approval workflow were added for this hackathon.
+
+**Repository:** https://github.com/AnanthKumar1810/agentforge (merge PR #3 to `main` before using this link as the final code)
+
+**Demo video:** Add the public link only after recording and verifying a real Switch room run. Do not use the offline test output as a live demo.
+
+The [official schedule](https://www.wemakedevs.org/hackathons/switch/schedule) requires the repository, README, and demo video by **November 7, 2026, 11:59 PM IST**. The [official rules](https://www.wemakedevs.org/hackathons/switch/rules) prohibit automated submissions; the registered entrant must submit in the portal personally.

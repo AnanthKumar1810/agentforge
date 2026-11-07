@@ -68,6 +68,23 @@ def test_reject_and_stale_source(tmp_path):
     assert (source / "sample.py").read_text() == "other edit\n"
 
 
+def test_unrelated_source_drift_blocks_approval(tmp_path):
+    flow, source, _ = setup(tmp_path)
+    proposed = run_immediate(flow.propose("fix", "reporter"))
+    (source / "test_sample.py").write_text("def test_changed(): assert False\n")
+    assert run_immediate(flow.decide(proposed["id"], "approve", "reviewer"))["status"] == "stale"
+    assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
+def test_binary_patch_cannot_be_reviewed_in_chat(tmp_path):
+    import pytest
+
+    flow, _, _ = setup(tmp_path)
+    (flow.engine.staged / "sample.py").write_bytes(b"def value(): return 2\x00\n")
+    with pytest.raises(ValueError, match="Binary patch"):
+        run_immediate(flow.propose("fix", "reporter"))
+
+
 def test_only_addressed_room_message_is_handled(tmp_path):
     flow, source, _ = setup(tmp_path)
     frame = {"event": "message", "data": {"room_id": "elsewhere", "payload": {

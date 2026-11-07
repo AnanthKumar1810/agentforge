@@ -5,6 +5,7 @@ import asyncio
 import difflib
 import hashlib
 import json
+import logging
 import os
 import re
 import uuid
@@ -15,6 +16,8 @@ from urllib.parse import urlencode, urlsplit
 from agentforge.engine import AgentForgeEngine
 from agentforge.source import snapshot_bytes, changed_files, _excluded
 from agentforge.validation import validate_workspace
+
+logger = logging.getLogger(__name__)
 
 
 def digest(data: bytes | None) -> str | None:
@@ -118,9 +121,16 @@ class RepairWorkflow:
             new = staged[path]
             if len(new) > 500_000 or path.startswith((".git/", ".env", "tests/", ".github/")) or Path(path).name.startswith("test_"):
                 raise ValueError(f"Unsafe staged path: {path}")
+            if b"\x00" in new or (old is not None and b"\x00" in old):
+                raise ValueError(f"Binary patch cannot be reviewed in chat: {path}")
+            try:
+                old_text = (old or b"").decode("utf-8")
+                new_text = new.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"Non-UTF-8 patch cannot be reviewed in chat: {path}") from exc
             files[path] = {"before": digest(old), "after": digest(new)}
-            diffs.extend(difflib.unified_diff((old or b"").decode("utf-8", "replace").splitlines(True),
-                                              new.decode("utf-8", "replace").splitlines(True),
+            diffs.extend(difflib.unified_diff(old_text.splitlines(True),
+                                              new_text.splitlines(True),
                                               fromfile=f"before/{path}", tofile=f"after/{path}"))
         diff = "".join(diffs)
         if len(diff) > 10000:
@@ -128,6 +138,7 @@ class RepairWorkflow:
             return {"status": "failed", "run_id": report.run_id}
         record = {"id": repair_id, "status": "pending", "requester": sender,
                   "run_id": report.run_id, "workspace": report.workspace,
+                  "source_hashes": {path: digest(data) for path, data in baseline.items()},
                   "files": files, "diff_sha256": digest(diff.encode()), "diff": diff,
                   "validation": report.validation.model_dump(mode="json")}
         self._save(record)
@@ -158,6 +169,11 @@ class RepairWorkflow:
             return record
         source = self.config.source_repo
         workspace = Path(record["workspace"])
+        current = {path: digest(data) for path, data in snapshot_bytes(source).items()
+                   if not any(_excluded(part) for part in Path(path).parts)}
+        if current != record["source_hashes"]:
+            await self.post(self.config.room_id, f"Repair {repair_id} blocked: source changed since proposal. Re-propose it.")
+            return {"status": "stale"}
         for path, hashes in record["files"].items():
             target = (source / path).resolve()
             staged = (workspace / path).resolve()
@@ -253,5 +269,9 @@ class SwitchClient:
     async def _handle_safely(self, frame: dict) -> None:
         try:
             await self.workflow.handle(frame)
-        except Exception as exc:
-            await self.post(self.config.room_id, f"Repair workflow stopped: {type(exc).__name__}: {exc}")
+        except Exception:
+            logger.exception("Switch repair workflow failed")
+            try:
+                await self.post(self.config.room_id, "Repair workflow stopped unexpectedly. Check the agent logs; no approval was inferred from this error.")
+            except Exception:
+                logger.exception("Could not post Switch workflow failure")

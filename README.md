@@ -47,7 +47,7 @@ AgentForge now has a Switch agent client for a team-chat repair workflow. A pers
 
 ### Reproduce without Switch credentials
 
-Run `python -m pytest -q -p no:cacheprovider tests/test_switch_repair.py` to exercise the staged patch, unauthorized approval, rejection, source-drift, and replay cases with an offline Switch transport and fake model. Run `python -m examples.demo_repair` for the existing deterministic repair engine demo. These are offline checks, not evidence of a live Switch room. For a recorded hackathon demo, show the real room messages, the source file unchanged before approval, then the approved source diff and post-approval test output.
+Run `python -m pytest -q -p no:cacheprovider tests/test_switch_repair.py` to exercise the staged patch, unauthorized approval, rejection, whole-source drift, binary-patch refusal, and replay cases with an offline Switch transport and fake model. Run `python -m examples.demo_repair` for the existing deterministic repair engine demo. The CI `docker-validator` job builds the image, confirms the included fixture fails before repair, then confirms it passes after the expected change. These are offline checks, not evidence of a live Switch room. For a recorded hackathon demo, show the real room messages, the source file unchanged before approval, then the approved source diff and post-approval test output.
 
 ### Safety boundary
 
