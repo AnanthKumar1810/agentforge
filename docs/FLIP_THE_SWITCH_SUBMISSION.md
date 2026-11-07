@@ -36,7 +36,7 @@ Registration was reported complete by the participant. This document does not as
 
 - The targeted offline suite passed locally: **35 passed, 1 skipped**. It covers reviewer authorization, rejection, replay, source drift, and reviewable text patches.
 - `python -m examples.demo_repair` passed locally with two attempts and one repair; the original fixture remained unchanged.
-- The existing GitHub Actions `tests` run for PR commit `577f87c` completed successfully. The new Docker validator job must be checked after this update is pushed.
+- [GitHub Actions run 42368232579](https://github.com/AnanthKumar1810/agentforge/actions/runs/42368232579) passed on PR commit `10b8042`: the Docker validator job and unit-test jobs for Python 3.11, 3.12, and 3.13 all succeeded. The Docker test verified the fixture fails before repair and passes after the expected edit.
 - The local Docker engine was unavailable during this check. The new Docker test has not yet been claimed as a local pass.
 - No Switch bridge, room, agent API key, or reviewer participant ID was present in this environment. No live Switch message flow or video is claimed.
 
