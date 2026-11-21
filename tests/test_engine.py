@@ -188,3 +188,22 @@ def test_edge_case_contract_catches_plausible_edit_that_passes_happy_path(tmp_pa
     assert report.validation.status == "failed"
     assert "test_upper_boundary" in str(report.validation.model_dump())
     assert "min(9, x)" in report.attempts[0]["diffs"]["sample.py"]
+
+
+def test_repeated_agent_deferral_stops_at_repair_budget(tmp_path, monkeypatch):
+    import agentforge.engine as module
+    from agentforge.models import ValidationSummary
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [])
+    monkeypatch.setattr(module, "validate_workspace", lambda *a, **k:
+                        ValidationSummary(passed=False, status="failed", issues=["contract failed"]))
+    roles = []
+    async def deferring_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        roles.append(name)
+        return "I defer to the other agent."
+    settings = Settings("test-model", tmp_path / "data", 2, 10, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=deferring_agent).run(
+        "Fix contract", allow_local_execution=True))
+    assert report.status == "failed"
+    assert report.repair_rounds == 2
+    assert len(report.attempts) == 3
+    assert roles.count("Developer") == 3
