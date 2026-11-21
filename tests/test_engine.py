@@ -164,3 +164,27 @@ def test_tool_timeout_aborts_without_blind_retry(tmp_path, monkeypatch):
     assert calls.count("Developer") == 1
     assert report.validation.status != "verified"
     assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
+def test_edge_case_contract_catches_plausible_edit_that_passes_happy_path(tmp_path, monkeypatch):
+    """A separate edge-case assertion catches an edit the happy-path test accepts."""
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    (source / "tests").mkdir(parents=True)
+    (source / "sample.py").write_text("def clamp(x): return max(0, min(10, x))\n")
+    (source / "tests/test_sample.py").write_text(
+        "from sample import clamp\n"
+        "def test_happy_path(): assert clamp(5) == 5\n"
+        "def test_upper_boundary(): assert clamp(12) == 10\n")
+    async def buggy_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "min(10, x)", "min(9, x)")
+        return "The normal input works."
+    settings = Settings("test-model", tmp_path / "data", 0, 20, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=buggy_agent).run(
+        "Preserve clamp behavior", source_repo=str(source), allow_local_execution=True))
+    assert report.status == "failed"
+    assert report.validation.status == "failed"
+    assert "test_upper_boundary" in str(report.validation.model_dump())
+    assert "min(9, x)" in report.attempts[0]["diffs"]["sample.py"]
