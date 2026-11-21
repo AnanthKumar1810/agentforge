@@ -99,7 +99,7 @@ async def run_agent(
 _OLLAMA_TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 workspace file.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
-    {"type": "function", "function": {"name": "write_file", "description": "Create or replace a workspace file.",
+    {"type": "function", "function": {"name": "write_file", "description": "Create a new workspace file or replace its ENTIRE contents. For a small edit to an existing file, use replace_text instead.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
                      "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "list_files", "description": "List workspace files.",
@@ -111,7 +111,7 @@ _OLLAMA_TOOLS = [
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"},
                                              "end_line": {"type": "integer"}},
                      "required": ["path", "start_line", "end_line"]}}},
-    {"type": "function", "function": {"name": "replace_text", "description": "Replace one exact text fragment in a file without rewriting the whole file.",
+    {"type": "function", "function": {"name": "replace_text", "description": "Edit an existing file by replacing exactly one matching old fragment. Requires path, old and new; use write_file only for full-file replacement.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
                                              "new": {"type": "string"}},
                      "required": ["path", "old", "new"]}}},
