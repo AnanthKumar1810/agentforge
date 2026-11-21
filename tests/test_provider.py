@@ -92,6 +92,27 @@ def test_ollama_exact_replacement_tool(tmp_path, monkeypatch):
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
 
 
+def test_wrong_edit_tool_missing_arguments_recovers_with_exact_replacement(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        _reply(_tool("write_file", path="sample.py", old="value = 0", new="value = 2")),
+        _reply(_tool("replace_text", path="sample.py", old="value = 0", new="value = 2")),
+        {"message": {"role": "assistant", "content": "Fixed."}},
+    ]
+    observed = []
+    def chat(endpoint, payload):
+        import copy
+        observed.append(copy.deepcopy(payload))
+        return replies.pop(0)
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    result = asyncio.run(run_agent("Developer", "instructions", "Change one value",
+                                   tools=[Workspace(tmp_path)], provider="ollama"))
+    assert result == "Fixed."
+    assert observed[1]["messages"][-1]["content"].startswith("ERROR: Missing required tool argument")
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
 def test_ollama_can_edit_after_eight_reads(tmp_path, monkeypatch):
     import agentforge.agents as module
     (tmp_path / "sample.py").write_text("value = 0\n")
