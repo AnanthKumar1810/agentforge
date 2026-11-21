@@ -88,6 +88,32 @@ def test_model_success_claim_cannot_override_failed_validation(tmp_path, monkeyp
     assert "Model review (interpretation, not validation evidence)" in markdown
 
 
+def test_tool_timeout_aborts_without_blind_retry(tmp_path, monkeypatch):
+    """A timed-out edit has an unknown outcome and must not be repeated blindly."""
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "sample.py").write_text("def value(): return 0\n")
+    calls = []
+
+    async def timed_out_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        calls.append(name)
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "return 0", "return 1")
+            raise TimeoutError("tool response lost after edit")
+        return "planned"
+
+    settings = Settings("test-model", tmp_path / "data", 2, 10, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=timed_out_agent).run(
+        "Fix value", source_repo=str(source), allow_local_execution=True))
+    assert report.status == "error"
+    assert "TimeoutError" in report.error
+    assert calls.count("Developer") == 1
+    assert report.validation.status != "verified"
+    assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
 def test_direct_ollama_handoff_reaches_real_validation(tmp_path, monkeypatch):
     import asyncio
     import agentforge.agents as adapter
@@ -139,3 +165,4 @@ def test_fast_mode_runs_developer_and_real_validation(tmp_path, monkeypatch):
     assert report.validation.status == "verified"
     assert report.attempts[0]["changed_files"] == ["sample.py"]
     assert "return 0" in (source / "sample.py").read_text()
+
