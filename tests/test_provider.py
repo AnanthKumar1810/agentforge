@@ -369,3 +369,36 @@ def test_fenced_tool_request_in_explanation_executes_first_call(tmp_path, monkey
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
 
 
+def test_unfenced_inline_json_tool_call_changes_file(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        {"message": {"role": "assistant", "content":
+             'I will fix it with {"name":"replace_text","arguments":{"path":"sample.py",'
+             '"old":"value = 0","new":"value = 2"}} now.'}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                 provider="ollama", require_edit=True)) == "Edited."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_inline_json_still_respects_tool_allowlist(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    workspace = Workspace(tmp_path)
+    workspace.ollama_tool_allowlist = {"replace_text"}
+    replies = [
+        {"message": {"role": "assistant", "content":
+             'Wrong call {"name":"write_file","arguments":{"path":"sample.py",'
+             '"content":"value = 3"}} then {"name":"replace_text","arguments":'
+             '{"path":"sample.py","old":"value = 0","new":"value = 2"}}'}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[workspace],
+                          provider="ollama", require_edit=True))
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
