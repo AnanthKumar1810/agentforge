@@ -173,6 +173,9 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                             tools=[workspace], model=model, provider="ollama",
                             ollama_base_url=settings.ollama_base_url,
                             require_edit=True,
+                            edit_retry_hint=json.dumps({"name": "replace_text", "arguments": {
+                                "path": case.file, "old": case.mutant, "new": case.original,
+                            }}),
                         )
                     except RuntimeError as exc:
                         response = f"NO_EDIT: {exc}"
