@@ -128,6 +128,34 @@ def test_required_edit_rejects_text_only_claims(tmp_path, monkeypatch):
     assert (tmp_path / "sample.py").read_text() == "value = 0\n"
 
 
+def test_five_attempt_budget_accepts_edit_on_last_response(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [{"message": {"role": "assistant", "content": "I would fix it."}}] * 4
+    replies += [_reply(_tool("replace_text", path="sample.py", old="value = 0", new="value = 2")),
+                {"message": {"role": "assistant", "content": "Edited."}}]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    result = asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                   provider="ollama", require_edit=True, max_no_edit_responses=5))
+    assert result == "Edited."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_five_attempt_budget_stops_after_fifth_no_edit(tmp_path, monkeypatch):
+    import pytest
+    import agentforge.agents as module
+    calls = 0
+    def chat(endpoint, payload):
+        nonlocal calls
+        calls += 1
+        return {"message": {"role": "assistant", "content": "I would fix it."}}
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    with pytest.raises(RuntimeError, match="after 5 no-edit responses"):
+        asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                              provider="ollama", require_edit=True, max_no_edit_responses=5))
+    assert calls == 5
+
+
 def test_wrong_edit_tool_missing_arguments_recovers_with_exact_replacement(tmp_path, monkeypatch):
     import agentforge.agents as module
     (tmp_path / "sample.py").write_text("value = 0\n")
