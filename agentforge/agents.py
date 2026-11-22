@@ -81,9 +81,11 @@ async def run_agent(
     name: str, instructions: str, prompt: str, *, tools: list[Any] | None = None,
     model: str = "gpt-5-mini", provider: str = "openai",
     ollama_base_url: str = "http://127.0.0.1:11434/v1/",
+    require_edit: bool = False,
 ) -> str:
     if provider == "ollama":
-        return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url)
+        return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url,
+                                       require_edit=require_edit)
     if provider == "openai":
         require_openai_key()
     try:
@@ -131,7 +133,7 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
 
 
 async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
-                            model: str, base_url: str) -> str:
+                            model: str, base_url: str, *, require_edit: bool = False) -> str:
     endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -153,6 +155,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     ]
     applied_writes: dict[str, str] = {}
     tool_trace: list[str] = []
+    no_edit_reprompts = 0
     for _ in range(16):
         payload = {"model": model, "messages": messages, "stream": False,
                    "options": {"temperature": 0.1, "num_predict": 1200}}
@@ -180,6 +183,18 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     calls = [{"function": candidate}]
                     break
         if not calls:
+            if require_edit and workspace is not None and not applied_writes:
+                if no_edit_reprompts >= 2:
+                    raise RuntimeError("Model ended without an accepted edit after two corrective prompts; "
+                                       "tool trace: " + ", ".join(tool_trace[:32]))
+                no_edit_reprompts += 1
+                messages.append({"role": "assistant", "content": str(message.get("content", ""))})
+                messages.append({"role": "user", "content":
+                                 "No workspace edit was observed. Do not describe a fix. Call the allowed "
+                                 "replace_text tool now with path, exact old text, and new text. "
+                                 "If native tool calls are unavailable, return ONLY a JSON object with "
+                                 "name and arguments for replace_text. Do not claim success until the tool runs."})
+                continue
             return str(message.get("content", ""))
         if workspace is None:
             raise RuntimeError("Ollama requested tools for an agent without a workspace")
@@ -261,5 +276,6 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
     raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files; "
                        "tool trace: " + ", ".join(tool_trace[:32]))
+
 
 
