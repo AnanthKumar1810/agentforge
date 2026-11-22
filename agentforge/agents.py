@@ -83,10 +83,12 @@ async def run_agent(
     ollama_base_url: str = "http://127.0.0.1:11434/v1/",
     require_edit: bool = False,
     edit_retry_hint: str | None = None,
+    max_no_edit_responses: int = 3,
 ) -> str:
     if provider == "ollama":
         return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url,
-                                       require_edit=require_edit, edit_retry_hint=edit_retry_hint)
+                                       require_edit=require_edit, edit_retry_hint=edit_retry_hint,
+                                       max_no_edit_responses=max_no_edit_responses)
     if provider == "openai":
         require_openai_key()
     try:
@@ -135,7 +137,10 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
 
 async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                             model: str, base_url: str, *, require_edit: bool = False,
-                            edit_retry_hint: str | None = None) -> str:
+                            edit_retry_hint: str | None = None,
+                            max_no_edit_responses: int = 3) -> str:
+    if max_no_edit_responses < 1 or max_no_edit_responses > 16:
+        raise ValueError("max_no_edit_responses must be between 1 and 16")
     endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -186,8 +191,9 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                     break
         if not calls:
             if require_edit and workspace is not None and not applied_writes:
-                if no_edit_reprompts >= 2:
-                    raise RuntimeError("Model ended without an accepted edit after two corrective prompts; "
+                if no_edit_reprompts >= max_no_edit_responses - 1:
+                    raise RuntimeError(f"Model ended without an accepted edit after {max_no_edit_responses} "
+                                       "no-edit responses; "
                                        "tool trace: " + ", ".join(tool_trace[:32]))
                 no_edit_reprompts += 1
                 messages.append({"role": "assistant", "content": str(message.get("content", ""))})
