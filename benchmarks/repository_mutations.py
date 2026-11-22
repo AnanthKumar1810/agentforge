@@ -161,17 +161,21 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                         "\nThe previous turn made no file change. Apply the exact replace_text tool call now; "
                         "do not answer with a description."
                     )
-                    response = await run_agent(
-                        "Developer", DEVELOPER,
-                        f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
-                        f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
-                        "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
-                        "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
-                        "repair; do not change tests, configuration, or dependencies, or execute commands."
-                        + retry_note,
-                        tools=[workspace], model=model, provider="ollama",
-                        ollama_base_url=settings.ollama_base_url,
-                    )
+                    try:
+                        response = await run_agent(
+                            "Developer", DEVELOPER,
+                            f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
+                            f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
+                            "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
+                            "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
+                            "repair; do not change tests, configuration, or dependencies, or execute commands."
+                            + retry_note,
+                            tools=[workspace], model=model, provider="ollama",
+                            ollama_base_url=settings.ollama_base_url,
+                            require_edit=True,
+                        )
+                    except RuntimeError as exc:
+                        response = f"NO_EDIT: {exc}"
                     responses.append(response)
                     after = snapshot_bytes(workspace_path)
                     changed = changed_files(before, after)
@@ -237,4 +241,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 
