@@ -88,58 +88,6 @@ def test_model_success_claim_cannot_override_failed_validation(tmp_path, monkeyp
     assert "Model review (interpretation, not validation evidence)" in markdown
 
 
-def test_direct_ollama_handoff_reaches_real_validation(tmp_path, monkeypatch):
-    import asyncio
-    import agentforge.agents as adapter
-    source = tmp_path / "source"
-    (source / "tests").mkdir(parents=True)
-    (source / "sample.py").write_text("def value(): return 0\n")
-    (source / "tests/test_value.py").write_text(
-        "from sample import value\ndef test_value(): assert value() == 2\n")
-    responses = iter([
-        {"message": {"content": "Fix sample.py; preserve maintained tests."}},
-        {"message": {"content": '{"name":"write_file","arguments":{"path":"sample.py","content":"def value(): return 2\\n"}}'}},
-        {"message": {"content": '{"name":"write_file","arguments":{"path":"sample.py","content":"def value(): return 2\\n"}}'}},
-        {"message": {"content": "Review the recorded pytest evidence."}},
-    ])
-    monkeypatch.setattr(adapter, "_ollama_chat", lambda *a: next(responses))
-    settings = Settings("fixture-model", tmp_path / "data", 0, 15, 1000, "unused",
-                        provider="ollama", validator="local")
-    report = asyncio.run(AgentForgeEngine(settings).run(
-        "Fix value", source_repo=str(source), allow_local_execution=True))
-    assert report.status == "passed", report.error or report.validation.issues
-    assert report.validation.status == "verified"
-    assert any(check.name == "pytest" and check.passed for check in report.validation.checks)
-    assert "return 2" in report.attempts[0]["diffs"]["sample.py"]
-    assert (source / "sample.py").read_text() == "def value(): return 0\n"
-
-
-def test_fast_mode_runs_developer_and_real_validation(tmp_path, monkeypatch):
-    import asyncio
-    import agentforge.engine as module
-    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
-    source = tmp_path / "source"
-    (source / "tests").mkdir(parents=True)
-    (source / "sample.py").write_text("def value(): return 0\n")
-    (source / "tests/test_value.py").write_text(
-        "from sample import value\ndef test_value(): assert value() == 2\n")
-    roles = []
-
-    async def agent(name, instructions, prompt, *, tools=None, model="unused"):
-        roles.append(name)
-        if name == "Developer":
-            tools[0].replace_text("sample.py", "return 0", "return 2")
-        return "Done"
-
-    settings = Settings("demo", tmp_path / "data", 0, 20, 1000, "unused", validator="local")
-    report = asyncio.run(AgentForgeEngine(settings, agent_call=agent).run(
-        "Fix value", source_repo=str(source), allow_local_execution=True, fast_mode=True))
-    assert roles == ["Developer"]
-    assert report.status == "passed"
-    assert report.validation.status == "verified"
-    assert report.attempts[0]["changed_files"] == ["sample.py"]
-    assert "return 0" in (source / "sample.py").read_text()
-
 def test_tool_timeout_aborts_without_blind_retry(tmp_path, monkeypatch):
     """A timed-out edit has an unknown outcome and must not be repeated blindly."""
     import agentforge.engine as module
@@ -207,3 +155,57 @@ def test_repeated_agent_deferral_stops_at_repair_budget(tmp_path, monkeypatch):
     assert report.repair_rounds == 2
     assert len(report.attempts) == 3
     assert roles.count("Developer") == 3
+
+
+def test_direct_ollama_handoff_reaches_real_validation(tmp_path, monkeypatch):
+    import asyncio
+    import agentforge.agents as adapter
+    source = tmp_path / "source"
+    (source / "tests").mkdir(parents=True)
+    (source / "sample.py").write_text("def value(): return 0\n")
+    (source / "tests/test_value.py").write_text(
+        "from sample import value\ndef test_value(): assert value() == 2\n")
+    responses = iter([
+        {"message": {"content": "Fix sample.py; preserve maintained tests."}},
+        {"message": {"content": '{"name":"write_file","arguments":{"path":"sample.py","content":"def value(): return 2\\n"}}'}},
+        {"message": {"content": '{"name":"write_file","arguments":{"path":"sample.py","content":"def value(): return 2\\n"}}'}},
+        {"message": {"content": "Review the recorded pytest evidence."}},
+    ])
+    monkeypatch.setattr(adapter, "_ollama_chat", lambda *a: next(responses))
+    settings = Settings("fixture-model", tmp_path / "data", 0, 15, 1000, "unused",
+                        provider="ollama", validator="local")
+    report = asyncio.run(AgentForgeEngine(settings).run(
+        "Fix value", source_repo=str(source), allow_local_execution=True))
+    assert report.status == "passed", report.error or report.validation.issues
+    assert report.validation.status == "verified"
+    assert any(check.name == "pytest" and check.passed for check in report.validation.checks)
+    assert "return 2" in report.attempts[0]["diffs"]["sample.py"]
+    assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
+def test_fast_mode_runs_developer_and_real_validation(tmp_path, monkeypatch):
+    import asyncio
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    (source / "tests").mkdir(parents=True)
+    (source / "sample.py").write_text("def value(): return 0\n")
+    (source / "tests/test_value.py").write_text(
+        "from sample import value\ndef test_value(): assert value() == 2\n")
+    roles = []
+
+    async def agent(name, instructions, prompt, *, tools=None, model="unused"):
+        roles.append(name)
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "return 0", "return 2")
+        return "Done"
+
+    settings = Settings("demo", tmp_path / "data", 0, 20, 1000, "unused", validator="local")
+    report = asyncio.run(AgentForgeEngine(settings, agent_call=agent).run(
+        "Fix value", source_repo=str(source), allow_local_execution=True, fast_mode=True))
+    assert roles == ["Developer"]
+    assert report.status == "passed"
+    assert report.validation.status == "verified"
+    assert report.attempts[0]["changed_files"] == ["sample.py"]
+    assert "return 0" in (source / "sample.py").read_text()
+
