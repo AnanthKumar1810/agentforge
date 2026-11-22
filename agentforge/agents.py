@@ -82,10 +82,11 @@ async def run_agent(
     model: str = "gpt-5-mini", provider: str = "openai",
     ollama_base_url: str = "http://127.0.0.1:11434/v1/",
     require_edit: bool = False,
+    edit_retry_hint: str | None = None,
 ) -> str:
     if provider == "ollama":
         return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url,
-                                       require_edit=require_edit)
+                                       require_edit=require_edit, edit_retry_hint=edit_retry_hint)
     if provider == "openai":
         require_openai_key()
     try:
@@ -133,7 +134,8 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
 
 
 async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
-                            model: str, base_url: str, *, require_edit: bool = False) -> str:
+                            model: str, base_url: str, *, require_edit: bool = False,
+                            edit_retry_hint: str | None = None) -> str:
     endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -193,7 +195,8 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                                  "No workspace edit was observed. Do not describe a fix. Call the allowed "
                                  "replace_text tool now with path, exact old text, and new text. "
                                  "If native tool calls are unavailable, return ONLY a JSON object with "
-                                 "name and arguments for replace_text. Do not claim success until the tool runs."})
+                                 "name and arguments for replace_text. Do not claim success until the tool runs."
+                                 + (" Expected call: " + edit_retry_hint if edit_retry_hint else "")})
                 continue
             return str(message.get("content", ""))
         if workspace is None:
