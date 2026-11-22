@@ -135,6 +135,20 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
         return json.load(response)
 
 
+def _text_tool_call(content: str, allowed: set[str]) -> dict | None:
+    """Find one allowed tool request in a plain, fenced, or inline JSON response."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", content):
+        try:
+            candidate, _ = decoder.raw_decode(content, match.start())
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(candidate, dict) and candidate.get("name") in allowed
+                and isinstance(candidate.get("arguments"), dict)):
+            return candidate
+    return None
+
+
 async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                             model: str, base_url: str, *, require_edit: bool = False,
                             edit_retry_hint: str | None = None,
@@ -177,18 +191,12 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             raise RuntimeError("Ollama returned invalid or excessive tool calls")
         if not calls and workspace is not None:
             content = str(message.get("content", "")).strip()
-            snippets = [content] + re.findall(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.DOTALL | re.IGNORECASE)
-            for snippet in snippets:
-                try:
-                    candidate = json.loads(snippet)
-                except json.JSONDecodeError:
-                    continue
-                allowed = {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}
-                if allowed_tool_names is not None:
-                    allowed &= allowed_tool_names
-                if isinstance(candidate, dict) and candidate.get("name") in allowed:
-                    calls = [{"function": candidate}]
-                    break
+            allowed = {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}
+            if allowed_tool_names is not None:
+                allowed &= allowed_tool_names
+            candidate = _text_tool_call(content, allowed)
+            if candidate is not None:
+                calls = [{"function": candidate}]
         if not calls:
             if require_edit and workspace is not None and not applied_writes:
                 if no_edit_reprompts >= max_no_edit_responses - 1:
