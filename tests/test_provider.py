@@ -107,10 +107,12 @@ def test_required_edit_reprompts_in_same_conversation(tmp_path, monkeypatch):
         return replies.pop(0)
     monkeypatch.setattr(module, "_ollama_chat", chat)
     result = asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
-                                   provider="ollama", require_edit=True))
+                                   provider="ollama", require_edit=True,
+                                   edit_retry_hint='{"name":"replace_text","arguments":{"path":"sample.py","old":"value = 0","new":"value = 2"}}'))
     assert result == "Edited."
     assert observed[1]["messages"][-2]["content"] == "I would set value to 2."
     assert "No workspace edit was observed" in observed[1]["messages"][-1]["content"]
+    assert '"old":"value = 0"' in observed[1]["messages"][-1]["content"]
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
 
 
