@@ -402,3 +402,23 @@ def test_inline_json_still_respects_tool_allowlist(tmp_path, monkeypatch):
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
 
 
+def test_inline_json_preserves_braces_inside_source_fragments(tmp_path, monkeypatch):
+    import json
+    import agentforge.agents as module
+    old = 'value = {"key": {"count": 0}}'
+    new = 'value = {"key": {"count": 2}}'
+    (tmp_path / "sample.py").write_text(old + "\n")
+    call = json.dumps({"name": "replace_text", "arguments": {
+        "path": "sample.py", "old": old, "new": new,
+    }})
+    replies = [
+        {"message": {"role": "assistant", "content": "I will apply " + call + " now."}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix nested value",
+                                 tools=[Workspace(tmp_path)], provider="ollama",
+                                 require_edit=True)) == "Edited."
+    assert (tmp_path / "sample.py").read_text() == new + "\n"
+
+
