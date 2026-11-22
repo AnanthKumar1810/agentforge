@@ -81,9 +81,14 @@ async def run_agent(
     name: str, instructions: str, prompt: str, *, tools: list[Any] | None = None,
     model: str = "gpt-5-mini", provider: str = "openai",
     ollama_base_url: str = "http://127.0.0.1:11434/v1/",
+    require_edit: bool = False,
+    edit_retry_hint: str | None = None,
+    max_no_edit_responses: int = 3,
 ) -> str:
     if provider == "ollama":
-        return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url)
+        return await _run_ollama_agent(instructions, prompt, tools or [], model, ollama_base_url,
+                                       require_edit=require_edit, edit_retry_hint=edit_retry_hint,
+                                       max_no_edit_responses=max_no_edit_responses)
     if provider == "openai":
         require_openai_key()
     try:
@@ -99,7 +104,7 @@ async def run_agent(
 _OLLAMA_TOOLS = [
     {"type": "function", "function": {"name": "read_file", "description": "Read a UTF-8 workspace file.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}}},
-    {"type": "function", "function": {"name": "write_file", "description": "Create or replace a workspace file.",
+    {"type": "function", "function": {"name": "write_file", "description": "Create a new workspace file or replace its ENTIRE contents. For a small edit to an existing file, use replace_text instead.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
                      "required": ["path", "content"]}}},
     {"type": "function", "function": {"name": "list_files", "description": "List workspace files.",
@@ -111,7 +116,7 @@ _OLLAMA_TOOLS = [
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "start_line": {"type": "integer"},
                                              "end_line": {"type": "integer"}},
                      "required": ["path", "start_line", "end_line"]}}},
-    {"type": "function", "function": {"name": "replace_text", "description": "Replace one exact text fragment in a file without rewriting the whole file.",
+    {"type": "function", "function": {"name": "replace_text", "description": "Edit an existing file by replacing exactly one matching old fragment. Requires path, old and new; use write_file only for full-file replacement.",
       "parameters": {"type": "object", "properties": {"path": {"type": "string"}, "old": {"type": "string"},
                                              "new": {"type": "string"}},
                      "required": ["path", "old", "new"]}}},
@@ -130,8 +135,26 @@ def _ollama_chat(endpoint: str, payload: dict) -> dict:
         return json.load(response)
 
 
+def _text_tool_call(content: str, allowed: set[str]) -> dict | None:
+    """Find one allowed tool request in a plain, fenced, or inline JSON response."""
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", content):
+        try:
+            candidate, _ = decoder.raw_decode(content, match.start())
+        except json.JSONDecodeError:
+            continue
+        if (isinstance(candidate, dict) and candidate.get("name") in allowed
+                and isinstance(candidate.get("arguments"), dict)):
+            return candidate
+    return None
+
+
 async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
-                            model: str, base_url: str) -> str:
+                            model: str, base_url: str, *, require_edit: bool = False,
+                            edit_retry_hint: str | None = None,
+                            max_no_edit_responses: int = 3) -> str:
+    if max_no_edit_responses < 1 or max_no_edit_responses > 16:
+        raise ValueError("max_no_edit_responses must be between 1 and 16")
     endpoint = base_url.rstrip("/").removesuffix("/v1") + "/api/chat"
     parsed = urlsplit(endpoint)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"} or parsed.path != "/api/chat" or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -153,6 +176,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
     ]
     applied_writes: dict[str, str] = {}
     tool_trace: list[str] = []
+    no_edit_reprompts = 0
     for _ in range(16):
         payload = {"model": model, "messages": messages, "stream": False,
                    "options": {"temperature": 0.1, "num_predict": 1200}}
@@ -167,19 +191,27 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
             raise RuntimeError("Ollama returned invalid or excessive tool calls")
         if not calls and workspace is not None:
             content = str(message.get("content", "")).strip()
-            snippets = [content] + re.findall(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.DOTALL | re.IGNORECASE)
-            for snippet in snippets:
-                try:
-                    candidate = json.loads(snippet)
-                except json.JSONDecodeError:
-                    continue
-                allowed = {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}
-                if allowed_tool_names is not None:
-                    allowed &= allowed_tool_names
-                if isinstance(candidate, dict) and candidate.get("name") in allowed:
-                    calls = [{"function": candidate}]
-                    break
+            allowed = {"read_file", "read_lines", "search_files", "write_file", "replace_text", "replace_line", "list_files"}
+            if allowed_tool_names is not None:
+                allowed &= allowed_tool_names
+            candidate = _text_tool_call(content, allowed)
+            if candidate is not None:
+                calls = [{"function": candidate}]
         if not calls:
+            if require_edit and workspace is not None and not applied_writes:
+                if no_edit_reprompts >= max_no_edit_responses - 1:
+                    raise RuntimeError(f"Model ended without an accepted edit after {max_no_edit_responses} "
+                                       "no-edit responses; "
+                                       "tool trace: " + ", ".join(tool_trace[:32]))
+                no_edit_reprompts += 1
+                messages.append({"role": "assistant", "content": str(message.get("content", ""))})
+                messages.append({"role": "user", "content":
+                                 "No workspace edit was observed. Do not describe a fix. Call the allowed "
+                                 "replace_text tool now with path, exact old text, and new text. "
+                                 "If native tool calls are unavailable, return ONLY a JSON object with "
+                                 "name and arguments for replace_text. Do not claim success until the tool runs."
+                                 + (" Expected call: " + edit_retry_hint if edit_retry_hint else "")})
+                continue
             return str(message.get("content", ""))
         if workspace is None:
             raise RuntimeError("Ollama requested tools for an agent without a workspace")
@@ -261,5 +293,6 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
         return f"Applied {len(applied_writes)} file write(s); model reached the tool-turn limit. Run deterministic validation."
     raise RuntimeError("Ollama agent exceeded the tool-turn limit without editing files; "
                        "tool trace: " + ", ".join(tool_trace[:32]))
+
 
 

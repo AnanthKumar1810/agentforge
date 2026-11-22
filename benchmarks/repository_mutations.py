@@ -155,28 +155,26 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                     max_file_bytes=settings.max_file_bytes,
                 )
                 before = snapshot_bytes(workspace_path)
-                responses = []
-                for attempt in range(2):
-                    retry_note = "" if attempt == 0 else (
-                        "\nThe previous turn made no file change. Apply the exact replace_text tool call now; "
-                        "do not answer with a description."
-                    )
+                try:
                     response = await run_agent(
                         "Developer", DEVELOPER,
                         f"USER REQUEST\n{case.request}\n\nTarget file: {case.file}\n"
                         f"Injected line: {case.mutant}\nExpected pre-mutation line: {case.original}\n"
                         "This is a seeded, oracle-guided regression benchmark. Call the workspace replace_text tool now, "
                         "using the target path, injected line as old, and pre-mutation line as new. Apply only that one-line "
-                        "repair; do not change tests, configuration, or dependencies, or execute commands."
-                        + retry_note,
+                        "repair; do not change tests, configuration, or dependencies, or execute commands.",
                         tools=[workspace], model=model, provider="ollama",
                         ollama_base_url=settings.ollama_base_url,
+                        require_edit=True,
+                        max_no_edit_responses=5,
+                        edit_retry_hint=json.dumps({"name": "replace_text", "arguments": {
+                            "path": case.file, "old": case.mutant, "new": case.original,
+                        }}),
                     )
-                    responses.append(response)
-                    after = snapshot_bytes(workspace_path)
-                    changed = changed_files(before, after)
-                    if changed:
-                        break
+                except RuntimeError as exc:
+                    response = f"NO_EDIT: {exc}"
+                after = snapshot_bytes(workspace_path)
+                changed = changed_files(before, after)
                 diff = "".join(difflib.unified_diff(
                     before.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
                     after.get(case.file, b"").decode("utf-8", "replace").splitlines(keepends=True),
@@ -187,8 +185,9 @@ async def run(model: str | None, output: Path, selected_case: str | None = None,
                               if source_only else None)
                 item["repair"] = {
                     "status": "passed" if validation and validation.status == "verified" else "failed",
-                    "response": responses,
-                    "repair_attempts": len(responses),
+                    "response": [response],
+                    "repair_attempts": 1,
+                    "max_no_edit_responses": 5,
                     "changed_files": changed,
                     "source_only": source_only,
                     "diff": diff,
@@ -237,4 +236,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 

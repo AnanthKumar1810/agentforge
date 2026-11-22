@@ -5,21 +5,24 @@ exact upstream commits. The [November 1 CI run](https://github.com/AnanthKumar18
 confirmed that all five original test suites pass and each injected one-line
 regression makes its suite fail. A local `qwen2.5-coder:3b` repair was then
 attempted in each case. **One of five repairs passed** its full suite in Docker.
-The other four made no accepted source edit. This is a guided repair benchmark,
+The other four made no accepted source edit. The [November 22 rerun](https://github.com/AnanthKumar1810/agentforge/actions/runs/45000569037)
+on `codex/timeout-fail-closed-test` verified **four of five repairs** using the
+same pinned repositories and model; Boltons still made no accepted edit. This is a guided repair benchmark,
 not a measure of blind bug discovery: the prompt includes the affected file,
 injected fragment, and expected original fragment.
 
-| Case | Pinned upstream commit | Injected regression | Latest repair |
+| Case | Pinned upstream commit | Injected regression | November 22 repair |
 | --- | --- | --- | --- |
 | [Boltons](https://github.com/mahmoud/boltons) `clamp` | `d31d821d56c8f7756af9c30a864077f2e5855321` | Swap nested `min` / `max` | No accepted edit |
-| [More Itertools](https://github.com/more-itertools/more-itertools) `take` | `08dca284ba5446a026afdc34067b658f9da989eb` | Take `n + 1` elements | No accepted edit |
-| [ItsDangerous](https://github.com/pallets/itsdangerous) compressed payload | `672971d66a2ef9f85151e53283113f33d642dabd` | Change compression marker | No accepted edit |
+| [More Itertools](https://github.com/more-itertools/more-itertools) `take` | `08dca284ba5446a026afdc34067b658f9da989eb` | Take `n + 1` elements | **Verified repair** |
+| [ItsDangerous](https://github.com/pallets/itsdangerous) compressed payload | `672971d66a2ef9f85151e53283113f33d642dabd` | Change compression marker | **Verified repair** |
 | [Iniconfig](https://github.com/pytest-dev/iniconfig) key whitespace | `a9e0ad14bcd0d9d3b68d2b699ce38399cbe64fdd` | Stop stripping key names | **Verified repair** |
-| [MarkupSafe](https://github.com/pallets/markupsafe) proxy escaping | `4e111271b1494995708a9e878a10829b5e10c7ba` | Use `isinstance` in escape path | No accepted edit |
+| [MarkupSafe](https://github.com/pallets/markupsafe) proxy escaping | `4e111271b1494995708a9e878a10829b5e10c7ba` | Use `isinstance` in escape path | **Verified repair** |
 
 The verified Iniconfig repair restored `key_name = name.strip()` in
 `src/iniconfig/_parse.py`; its full suite passed in the restricted Docker
-validator. CI artifacts preserve per-case baseline, mutation, repair response,
+validator. In the November 22 run, More Itertools, ItsDangerous, and MarkupSafe
+also produced target-only diffs and passed their full suites. CI artifacts preserve per-case baseline, mutation, repair response,
 diff, and validation result. The earlier [Docker preflight](https://github.com/AnanthKumar1810/agentforge/actions/runs/41211198361)
 also confirmed passing upstream and failing mutations for Boltons and More
 Itertools.
@@ -53,5 +56,7 @@ Workspace search now streams its first 1,000 Python paths instead of building
 an unbounded path list; broader indexed navigation remains future work.
 Raise import, file, and validation budgets deliberately per case; the current
 limits and the Docker image are tuned for small Python repositories. Keep the
-full maintained suite as the final gate. Five curated mutations and one guided
-model repair do not establish general repair reliability or production safety.
+full maintained suite as the final gate. Five curated mutations and four verified
+guided repairs in one rerun do not establish general repair reliability or production safety.
+Repeated runs are needed to estimate success frequency for each case.
+

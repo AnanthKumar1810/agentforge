@@ -88,6 +88,75 @@ def test_model_success_claim_cannot_override_failed_validation(tmp_path, monkeyp
     assert "Model review (interpretation, not validation evidence)" in markdown
 
 
+def test_tool_timeout_aborts_without_blind_retry(tmp_path, monkeypatch):
+    """A timed-out edit has an unknown outcome and must not be repeated blindly."""
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "sample.py").write_text("def value(): return 0\n")
+    calls = []
+
+    async def timed_out_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        calls.append(name)
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "return 0", "return 1")
+            raise TimeoutError("tool response lost after edit")
+        return "planned"
+
+    settings = Settings("test-model", tmp_path / "data", 2, 10, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=timed_out_agent).run(
+        "Fix value", source_repo=str(source), allow_local_execution=True))
+    assert report.status == "error"
+    assert "TimeoutError" in report.error
+    assert calls.count("Developer") == 1
+    assert report.validation.status != "verified"
+    assert (source / "sample.py").read_text() == "def value(): return 0\n"
+
+
+def test_edge_case_contract_catches_plausible_edit_that_passes_happy_path(tmp_path, monkeypatch):
+    """A separate edge-case assertion catches an edit the happy-path test accepts."""
+    import agentforge.engine as module
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [workspace])
+    source = tmp_path / "source"
+    (source / "tests").mkdir(parents=True)
+    (source / "sample.py").write_text("def clamp(x): return max(0, min(10, x))\n")
+    (source / "tests/test_sample.py").write_text(
+        "from sample import clamp\n"
+        "def test_happy_path(): assert clamp(5) == 5\n"
+        "def test_upper_boundary(): assert clamp(12) == 10\n")
+    async def buggy_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        if name == "Developer":
+            tools[0].replace_text("sample.py", "min(10, x)", "min(9, x)")
+        return "The normal input works."
+    settings = Settings("test-model", tmp_path / "data", 0, 20, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=buggy_agent).run(
+        "Preserve clamp behavior", source_repo=str(source), allow_local_execution=True))
+    assert report.status == "failed"
+    assert report.validation.status == "failed"
+    assert "test_upper_boundary" in str(report.validation.model_dump())
+    assert "min(9, x)" in report.attempts[0]["diffs"]["sample.py"]
+
+
+def test_repeated_agent_deferral_stops_at_repair_budget(tmp_path, monkeypatch):
+    import agentforge.engine as module
+    from agentforge.models import ValidationSummary
+    monkeypatch.setattr(module, "build_workspace_tools", lambda workspace: [])
+    monkeypatch.setattr(module, "validate_workspace", lambda *a, **k:
+                        ValidationSummary(passed=False, status="failed", issues=["contract failed"]))
+    roles = []
+    async def deferring_agent(name, instructions, prompt, *, tools=None, model="unused"):
+        roles.append(name)
+        return "I defer to the other agent."
+    settings = Settings("test-model", tmp_path / "data", 2, 10, 1000, "unused", validator="local")
+    report = run_immediate(AgentForgeEngine(settings, agent_call=deferring_agent).run(
+        "Fix contract", allow_local_execution=True))
+    assert report.status == "failed"
+    assert report.repair_rounds == 2
+    assert len(report.attempts) == 3
+    assert roles.count("Developer") == 3
+
+
 def test_direct_ollama_handoff_reaches_real_validation(tmp_path, monkeypatch):
     import asyncio
     import agentforge.agents as adapter
@@ -139,3 +208,4 @@ def test_fast_mode_runs_developer_and_real_validation(tmp_path, monkeypatch):
     assert report.validation.status == "verified"
     assert report.attempts[0]["changed_files"] == ["sample.py"]
     assert "return 0" in (source / "sample.py").read_text()
+

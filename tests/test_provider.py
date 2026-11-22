@@ -92,6 +92,91 @@ def test_ollama_exact_replacement_tool(tmp_path, monkeypatch):
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
 
 
+def test_required_edit_reprompts_in_same_conversation(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        {"message": {"role": "assistant", "content": "I would set value to 2."}},
+        _reply(_tool("replace_text", path="sample.py", old="value = 0", new="value = 2")),
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    observed = []
+    def chat(endpoint, payload):
+        import copy
+        observed.append(copy.deepcopy(payload))
+        return replies.pop(0)
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    result = asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                   provider="ollama", require_edit=True,
+                                   edit_retry_hint='{"name":"replace_text","arguments":{"path":"sample.py","old":"value = 0","new":"value = 2"}}'))
+    assert result == "Edited."
+    assert observed[1]["messages"][-2]["content"] == "I would set value to 2."
+    assert "No workspace edit was observed" in observed[1]["messages"][-1]["content"]
+    assert '"old":"value = 0"' in observed[1]["messages"][-1]["content"]
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_required_edit_rejects_text_only_claims(tmp_path, monkeypatch):
+    import pytest
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload:
+                        {"message": {"role": "assistant", "content": "Fixed it."}})
+    with pytest.raises(RuntimeError, match="without an accepted edit"):
+        asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                              provider="ollama", require_edit=True))
+    assert (tmp_path / "sample.py").read_text() == "value = 0\n"
+
+
+def test_five_attempt_budget_accepts_edit_on_last_response(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [{"message": {"role": "assistant", "content": "I would fix it."}}] * 4
+    replies += [_reply(_tool("replace_text", path="sample.py", old="value = 0", new="value = 2")),
+                {"message": {"role": "assistant", "content": "Edited."}}]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    result = asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                   provider="ollama", require_edit=True, max_no_edit_responses=5))
+    assert result == "Edited."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_five_attempt_budget_stops_after_fifth_no_edit(tmp_path, monkeypatch):
+    import pytest
+    import agentforge.agents as module
+    calls = 0
+    def chat(endpoint, payload):
+        nonlocal calls
+        calls += 1
+        return {"message": {"role": "assistant", "content": "I would fix it."}}
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    with pytest.raises(RuntimeError, match="after 5 no-edit responses"):
+        asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                              provider="ollama", require_edit=True, max_no_edit_responses=5))
+    assert calls == 5
+
+
+def test_wrong_edit_tool_missing_arguments_recovers_with_exact_replacement(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        _reply(_tool("write_file", path="sample.py", old="value = 0", new="value = 2")),
+        _reply(_tool("replace_text", path="sample.py", old="value = 0", new="value = 2")),
+        {"message": {"role": "assistant", "content": "Fixed."}},
+    ]
+    observed = []
+    def chat(endpoint, payload):
+        import copy
+        observed.append(copy.deepcopy(payload))
+        return replies.pop(0)
+    monkeypatch.setattr(module, "_ollama_chat", chat)
+    result = asyncio.run(run_agent("Developer", "instructions", "Change one value",
+                                   tools=[Workspace(tmp_path)], provider="ollama"))
+    assert result == "Fixed."
+    assert observed[1]["messages"][-1]["content"].startswith("ERROR: Missing required tool argument")
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
 def test_ollama_can_edit_after_eight_reads(tmp_path, monkeypatch):
     import agentforge.agents as module
     (tmp_path / "sample.py").write_text("value = 0\n")
@@ -282,4 +367,58 @@ def test_fenced_tool_request_in_explanation_executes_first_call(tmp_path, monkey
                                  provider="ollama")) == "Fixed."
     assert seen[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "search_files"
     assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_unfenced_inline_json_tool_call_changes_file(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    replies = [
+        {"message": {"role": "assistant", "content":
+             'I will fix it with {"name":"replace_text","arguments":{"path":"sample.py",'
+             '"old":"value = 0","new":"value = 2"}} now.'}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[Workspace(tmp_path)],
+                                 provider="ollama", require_edit=True)) == "Edited."
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_inline_json_still_respects_tool_allowlist(tmp_path, monkeypatch):
+    import agentforge.agents as module
+    (tmp_path / "sample.py").write_text("value = 0\n")
+    workspace = Workspace(tmp_path)
+    workspace.ollama_tool_allowlist = {"replace_text"}
+    replies = [
+        {"message": {"role": "assistant", "content":
+             'Wrong call {"name":"write_file","arguments":{"path":"sample.py",'
+             '"content":"value = 3"}} then {"name":"replace_text","arguments":'
+             '{"path":"sample.py","old":"value = 0","new":"value = 2"}}'}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    asyncio.run(run_agent("Developer", "instructions", "Fix value", tools=[workspace],
+                          provider="ollama", require_edit=True))
+    assert (tmp_path / "sample.py").read_text() == "value = 2\n"
+
+
+def test_inline_json_preserves_braces_inside_source_fragments(tmp_path, monkeypatch):
+    import json
+    import agentforge.agents as module
+    old = 'value = {"key": {"count": 0}}'
+    new = 'value = {"key": {"count": 2}}'
+    (tmp_path / "sample.py").write_text(old + "\n")
+    call = json.dumps({"name": "replace_text", "arguments": {
+        "path": "sample.py", "old": old, "new": new,
+    }})
+    replies = [
+        {"message": {"role": "assistant", "content": "I will apply " + call + " now."}},
+        {"message": {"role": "assistant", "content": "Edited."}},
+    ]
+    monkeypatch.setattr(module, "_ollama_chat", lambda endpoint, payload: replies.pop(0))
+    assert asyncio.run(run_agent("Developer", "instructions", "Fix nested value",
+                                 tools=[Workspace(tmp_path)], provider="ollama",
+                                 require_edit=True)) == "Edited."
+    assert (tmp_path / "sample.py").read_text() == new + "\n"
+
 
