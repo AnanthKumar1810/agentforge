@@ -83,8 +83,8 @@ def validate_workspace(workspace: Path, *, timeout_seconds: int = 90,
         checks = [_run_check("python-syntax", [sys.executable, *syntax], root, timeout_seconds)]
     tests_exist = any(root.rglob("test_*.py")) or any(root.rglob("*_test.py"))
     issues: list[str] = []
-    if tests_exist:
-        targets = selected_tests or ["."]
+    targets = (selected_tests or ["."]) if tests_exist else []
+    if tests_exist and checks[0].passed:
         if runner == "docker":
             paths = ["/workspace/" + path if path != "." else "/workspace" for path in targets]
             command, container = _docker_command(root, ["-m", "pytest", "-q", "-p", "no:cacheprovider", "--basetemp=/tmp/pytest", *paths])
@@ -99,6 +99,8 @@ def validate_workspace(workspace: Path, *, timeout_seconds: int = 90,
                 checks.append(_run_check("pytest-full", [sys.executable, "-m", "pytest", "-q"], root, timeout_seconds))
         if checks[-1].exit_code == 5:
             issues.append("pytest found no tests to run")
+    elif tests_exist:
+        issues.append("Syntax check failed; pytest was skipped")
     else:
         issues.append("No test files found; pytest was skipped")
     issues.extend(
@@ -108,6 +110,6 @@ def validate_workspace(workspace: Path, *, timeout_seconds: int = 90,
     return ValidationSummary(
         passed=tests_exist and all(check.passed for check in checks), checks=checks, issues=issues,
         status=("verified" if tests_exist and all(check.passed for check in checks) else "syntax_only" if not tests_exist and all(check.passed for check in checks) else "failed"),
-        selected_tests=targets if tests_exist else [],
+        selected_tests=targets,
         duration_seconds=round(time.monotonic() - started, 3),
     )
