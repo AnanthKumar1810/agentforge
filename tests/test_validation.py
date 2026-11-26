@@ -17,3 +17,17 @@ def test_valid_python_compiles(tmp_path: Path) -> None:
     check = next(check for check in result.checks if check.name == "python-syntax")
     assert check.passed
     assert result.status == "syntax_only"
+
+
+def test_syntax_failure_skips_test_execution(tmp_path: Path) -> None:
+    (tmp_path / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+    marker = tmp_path / "pytest-ran"
+    (tmp_path / "test_sentinel.py").write_text(
+        f"from pathlib import Path\nPath({str(marker)!r}).touch()\n", encoding="utf-8",
+    )
+
+    result = validate_workspace(tmp_path, timeout_seconds=10)
+
+    assert result.status == "failed"
+    assert [check.name for check in result.checks] == ["python-syntax"]
+    assert not marker.exists()
