@@ -27,6 +27,8 @@ def make_parser() -> argparse.ArgumentParser:
     a2a.add_argument("--host", default="127.0.0.1"); a2a.add_argument("--port", type=int, default=8002)
     mcp = sub.add_parser("mcp", help="start the MCP server")
     mcp.add_argument("--host", default="127.0.0.1"); mcp.add_argument("--port", type=int, default=8001)
+    switch = sub.add_parser("switch", help="run the Switch-mediated repair agent")
+    switch.add_argument("--check", action="store_true", help="validate Switch configuration and bridge health")
     return parser
 
 
@@ -51,6 +53,17 @@ def main() -> None:
             os.environ["AGENTFORGE_MCP_HOST"] = args.host; os.environ["AGENTFORGE_MCP_PORT"] = str(args.port)
             from agentforge.protocols.mcp_server import run_server
             run_server(); return
+        if args.command == "switch":
+            from agentforge.switch_repair import SwitchClient, SwitchConfig
+            import httpx
+            config = SwitchConfig.from_env()
+            with httpx.Client(timeout=10) as client:
+                response = client.get(config.base_url + "/health")
+                response.raise_for_status()
+            if args.check:
+                print("Switch bridge is reachable; local configuration is valid.")
+                return
+            asyncio.run(SwitchClient(config).run()); return
     except KeyboardInterrupt:
         raise SystemExit(130)
     except SystemExit:
