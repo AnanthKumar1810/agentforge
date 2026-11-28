@@ -2,17 +2,23 @@
 
 from __future__ import annotations
 from datetime import datetime, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Literal
 from pathlib import Path
 import uuid
 
+from agntid.context import PlannedAction
+
 from agentforge.agents import build_workspace_tools, run_agent
+from agentforge.agntid import AgntIDRuntimeConfig, AgntIDSession, FakeAgntidMCPRuntime
 from agentforge.config import Settings
+from agentforge.governed_workspace import GovernedWorkspace
 from agentforge.integrations import run_beeai_risk_review, run_crewai_planning
 from agentforge.models import RunReport, ValidationSummary
 from agentforge.reporting import write_reports
+from agentforge.security_models import SecuritySummary
 from agentforge.validation import validate_workspace
 from agentforge.workspace import Workspace, PROTECTED_FILES
+from agentforge.workspace_routes import workspace_data_root
 from agentforge.source import import_source, snapshot_bytes, changed_files
 from agentforge.test_policy import select_tests
 import difflib
@@ -48,6 +54,8 @@ class AgentForgeEngine:
         test_manifest: str | None = None, generate_tests: bool = False,
         allow_local_execution: bool = False,
         fast_mode: bool = False,
+        agntid_mode: Literal["off", "mcp", "mock"] | None = None,
+        agntid_client: Any | None = None,
     ) -> RunReport:
         if not request or not request.strip():
             raise ValueError("request cannot be empty")
@@ -56,12 +64,18 @@ class AgentForgeEngine:
         repair_limit = self.settings.max_repair_rounds if max_repair_rounds is None else max_repair_rounds
         if not isinstance(repair_limit, int) or not 0 <= repair_limit <= 5:
             raise ValueError("max_repair_rounds must be an integer from 0 to 5")
+        effective_agntid_mode = agntid_mode or self.settings.agntid_mode
+        if effective_agntid_mode not in {"off", "mcp", "mock"}:
+            raise ValueError("agntid_mode must be off, mcp, or mock")
 
         run_id = uuid.uuid4().hex
         started = datetime.now(timezone.utc)
         run_dir = (self.settings.data_dir / "runs" / run_id).resolve()
         workspace_path = run_dir / "workspace"
-        workspace = Workspace(workspace_path, max_file_bytes=self.settings.max_file_bytes)
+        raw_workspace = Workspace(workspace_path, max_file_bytes=self.settings.max_file_bytes)
+        workspace: Workspace = raw_workspace
+        agntid_session: AgntIDSession | None = None
+        governed_workspace: GovernedWorkspace | None = None
         output_dir = run_dir / "artifacts"
         plan, review, changes_summary, error = "", "", "", None
         optional_context: dict[str, str] = {}
@@ -81,6 +95,49 @@ class AgentForgeEngine:
                 optional_context["crewai_plan"] = await run_crewai_planning(request, self.settings.model)
             if use_beeai:
                 optional_context["beeai_risk_review"] = await run_beeai_risk_review(request, plan, self.settings.beeai_model)
+
+            if effective_agntid_mode in {"mcp", "mock"}:
+                agntid_cfg = AgntIDRuntimeConfig(
+                    mode=effective_agntid_mode,  # type: ignore[arg-type]
+                    mcp_url=self.settings.agntid_mcp_url,
+                    agent_id=self.settings.agntid_agent_id,
+                    user_id=self.settings.agntid_user_id,
+                    timeout_seconds=self.settings.agntid_timeout_seconds,
+                    tool_prefix=self.settings.agntid_tool_prefix,
+                )
+                agntid_cfg.validate()
+                mock_client = agntid_client
+                if mock_client is None and effective_agntid_mode == "mock":
+                    mock_client = FakeAgntidMCPRuntime(raw_workspace)
+                agntid_session = AgntIDSession(
+                    agntid_cfg,
+                    mcp_client=mock_client,
+                    is_mock=(effective_agntid_mode == "mock"),
+                )
+                if effective_agntid_mode == "mcp":
+                    shared_root = self.settings.agntid_workspace_root or workspace_data_root(self.settings.data_dir)
+                    agntid_session.bind_workspace(raw_workspace, shared_root)
+                agntid_session.open(
+                    request,
+                    plan_text=plan,
+                    planned_actions=[
+                        PlannedAction(
+                            action_id="implement",
+                            title="Implement requested workspace change",
+                            tool_name="write_file",
+                            expected_agent_id=f"{agntid_cfg.agent_id}:developer",
+                        )
+                    ],
+                    delegate_to_agent_id=f"{agntid_cfg.agent_id}:developer",
+                )
+                governed_workspace = GovernedWorkspace(
+                    raw_workspace,
+                    agntid_session,
+                    intended_task=request,
+                    run_id=run_id,
+                )
+                workspace = governed_workspace
+
             tools = [workspace] if self.settings.provider == "ollama" and self.agent_call is run_agent else build_workspace_tools(workspace)
             changes_summary = await self._ask(
                 "Developer", DEVELOPER,
@@ -141,6 +198,19 @@ class AgentForgeEngine:
             ))
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
+        finally:
+            if agntid_session is not None:
+                agntid_session.close(
+                    status="failed" if error else "completed",
+                    reason=error or "Run finished",
+                )
+
+        security_summary: SecuritySummary | None = None
+        if governed_workspace is not None:
+            security_summary = governed_workspace.security_summary
+        elif agntid_session is not None:
+            security_summary = SecuritySummary(intended_task=request)
+            agntid_session.populate_summary_metadata(security_summary)
 
         status = "error" if error else ("passed" if validation.status == "verified" else "unverified" if validation.status == "syntax_only" else "failed")
         report = RunReport(
@@ -148,7 +218,17 @@ class AgentForgeEngine:
             finished_at=datetime.now(timezone.utc), workspace=str(workspace_path.resolve()),
             plan=plan, optional_context=optional_context, validation=validation,
             repair_rounds=repair_rounds, attempts=attempts, tester_notes=tester_notes, review=review, error=error,
-            metadata={"model": self.settings.model, "provider": self.settings.provider, "validator": self.settings.validator, "max_repair_rounds": repair_limit, "change_summary": changes_summary, "allow_local_execution": allow_local_execution, "fast_mode": fast_mode},
+            metadata={
+                "model": self.settings.model,
+                "provider": self.settings.provider,
+                "validator": self.settings.validator,
+                "max_repair_rounds": repair_limit,
+                "change_summary": changes_summary,
+                "allow_local_execution": allow_local_execution,
+                "fast_mode": fast_mode,
+                "agntid_mode": effective_agntid_mode,
+            },
+            security=security_summary,
         )
         report.artifacts = write_reports(report, output_dir)
         return report

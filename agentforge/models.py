@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Any, Literal
 from pydantic import BaseModel, Field
 
+from agentforge.security_models import SecuritySummary
+
 
 class ValidationCheck(BaseModel):
     name: str
@@ -41,3 +43,4 @@ class RunReport(BaseModel):
     error: str | None = None
     artifacts: dict[str, str] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    security: SecuritySummary | None = None

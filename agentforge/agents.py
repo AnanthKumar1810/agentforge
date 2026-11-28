@@ -74,7 +74,19 @@ def build_workspace_tools(workspace: Workspace) -> list[Any]:
         except (WorkspaceError, OSError) as exc:
             return f"ERROR: {exc}"
 
-    return [read_file, read_lines, search_files, write_file, replace_text, replace_line, list_files]
+    all_tools = [
+        ("read_file", read_file),
+        ("read_lines", read_lines),
+        ("search_files", search_files),
+        ("write_file", write_file),
+        ("replace_text", replace_text),
+        ("replace_line", replace_line),
+        ("list_files", list_files),
+    ]
+    allowlist = getattr(workspace, "ollama_tool_allowlist", None)
+    if allowlist is not None:
+        return [tool for tool_name, tool in all_tools if tool_name in allowlist]
+    return [tool for _, tool in all_tools]
 
 
 async def run_agent(
@@ -259,8 +271,9 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                 elif name in {"write_file", "replace_text", "replace_line"}:
                     batch_write = True
                     fingerprint = json.dumps([name, args], sort_keys=True)
+                    host_read = getattr(workspace, "_host_read_for_diff", workspace.read_text)
                     try:
-                        before = workspace.read_text(args["path"])
+                        before = host_read(args["path"])
                     except WorkspaceError:
                         before = None
                     if fingerprint in applied_writes and before == applied_writes[fingerprint]:
@@ -274,7 +287,7 @@ async def _run_ollama_agent(instructions: str, prompt: str, tools: list[Any],
                             result = workspace.replace_text(args["path"], args["old"], args["new"])
                         else:
                             result = workspace.replace_line(args["path"], args["line"], args["new"])
-                        after = workspace.read_text(args["path"])
+                        after = host_read(args["path"])
                         applied_writes[fingerprint] = after
                         batch_changed |= before != after
                 elif name == "list_files":

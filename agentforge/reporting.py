@@ -4,13 +4,21 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from agentforge.models import RunReport
+from agentforge.security_reporting import build_security_markdown_lines, write_security_report
 
 
 def write_reports(report: RunReport, output_dir: Path) -> dict[str, str]:
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "report.json"
     markdown_path = output_dir / "report.md"
-    report.artifacts = {"json": str(json_path.resolve()), "markdown": str(markdown_path.resolve())}
+    artifacts: dict[str, str] = {
+        "json": str(json_path.resolve()),
+        "markdown": str(markdown_path.resolve()),
+    }
+    if report.security is not None:
+        sec_artifacts = write_security_report(report.security, output_dir)
+        artifacts.update(sec_artifacts)
+    report.artifacts = artifacts
     json_path.write_text(json.dumps(report.model_dump(mode="json"), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     lines = [
         "# AgentForge run report", "", f"- Run ID: {report.run_id}",
@@ -38,6 +46,8 @@ def write_reports(report: RunReport, output_dir: Path) -> dict[str, str]:
         for path, diff in attempt["diffs"].items():
             lines += [f"#### {path}", "", "```diff", diff, "```", ""]
     lines += ["## Model review (interpretation, not validation evidence)", "", report.review or "(No review output)", ""]
+    if report.security is not None:
+        lines += build_security_markdown_lines(report.security, heading_level=2)
     if report.error:
         lines += ["## Error", "", report.error, ""]
     markdown_path.write_text("\n".join(lines), encoding="utf-8")

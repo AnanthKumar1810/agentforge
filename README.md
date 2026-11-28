@@ -1,6 +1,21 @@
-# AgentForge
+# AgentForge — Intent-Aware Secure Coding Agent
 
-AgentForge is a reference implementation of an agentic software-engineering system. It deliberately combines deterministic orchestration with specialized AI agents instead of turning the entire application into one uncontrolled autonomous loop.
+AgentForge is a controlled, auditable multi-agent software-engineering system that combines deterministic orchestration, path-confined workspace tools, deterministic syntax/test validation, and runtime tool authorization through **AgntID** (`AGNTID-AI/agntid-python`, `agntid-sdk`).
+
+## AgntID hackathon status · November 28, 2026
+
+- **Verified offline rehearsal.** The demo submits the same `utils.py` write under two task scopes. The mock denied the narrow request and allowed the broader refactor. The calculator repair passed its tests. The local suite passed 103 tests with two skips.
+- **Live verification pending.** The local AgntID runtime was registered and reachable. It could not reach the AgentForge workspace tool server, so neither live task produced an AgntID verdict for the edit. The narrated video uses mock verdicts.
+- **Reproduce.** Install the project with `pip install -e ".[dev]"` and run `python -m examples.demo_agntid_security`. The [live setup guide](docs/HACKATHON_DEMO.md#3-register-and-run-the-live-demo) covers workspace registration and audit checks.
+
+## Security Problem & Hackathon Focus
+
+Autonomous coding agents frequently operate with overly broad file or command access. System-prompt rules alone do not stop prompt injection, scope creep, or accidental edits to secrets and tests. AgentForge places an explicit authorization boundary (`GovernedWorkspace` + `AgntIDSession`) across its unified tool execution layer so every tool call is evaluated against the user's intended task before touching disk—while independently preserving AgentForge's local containment, credential exclusion, and maintained-test protections.
+
+See:
+- [AgntID Integration Guide](docs/AGNTID_INTEGRATION.md)
+- [Security Experiments](docs/SECURITY_EXPERIMENTS.md)
+- [Hackathon Demo Guide](docs/HACKATHON_DEMO.md)
 
 ## Competition evidence (November 1, 2026)
 
@@ -53,20 +68,23 @@ User / API / A2A
           |
           +--> BeeAI Research Specialist (optional)
           |
-          +--> Developer (OpenAI Agents SDK + file tools)
-          |
-          +--> Deterministic Validator
-          |       | compileall
-          |       + pytest when tests are present
-          |
-          +--> Tester (OpenAI Agents SDK)
-          |       |
-          |       +--> bounded repair loop --> Developer
-          |
-          +--> Reviewer (OpenAI Agents SDK)
-          |
-          v
-     RunReport + artifacts
+|           +--> Developer (OpenAI Agents SDK / Ollama + GovernedWorkspace)
+|           |       |
+|           |       +--> AgntID Runtime Auth (agntid-sdk MCP proxy / mock)
+|           |       +--> Local Workspace Policy (containment, .env, tests)
+|           |
+|           +--> Deterministic Validator
+|           |       | compileall
+|           |       + pytest when tests are present
+|           |
+|           +--> Tester (OpenAI Agents SDK)
+|           |       |
+|           |       +--> bounded repair loop --> Developer
+|           |
+|           +--> Reviewer (OpenAI Agents SDK)
+|           |
+|           v
+|      RunReport + security_report.{json,md} + artifacts
 ```
 
 MCP is used for agent-to-tool exposure. A2A is used for agent-to-agent/service interoperability. They solve different layers of the system.
@@ -144,7 +162,33 @@ It exposes workspace tools at `http://127.0.0.1:8001/mcp` by default. This optio
 pytest -q
 ```
 
-For an offline judge demonstration, run `python -m examples.demo_repair` from the repository root. It uses labeled fake agent responses, executes the actual import/validation/repair/report pipeline against a tiny fixture, and saves `.agentforge-data/demo-report.md`. It does not demonstrate model quality.
+To run the security experiments in the offline mock simulation:
+
+```bash
+python -m examples.security_experiments
+python -m examples.demo_agntid_security
+```
+
+For the original offline repair workflow demonstration, run `python -m examples.demo_repair` from the repository root. It uses labeled fake agent responses, executes the actual import/validation/repair/report pipeline against a tiny fixture, and saves `.agentforge-data/demo-report.md`. It does not demonstrate model quality.
+
+## AgntID Configuration & Known Limitations
+
+Configure AgntID integration in `.env` (see `.env.example`):
+
+- `AGENTFORGE_AGNTID_MODE`: `off` (default), `mcp` (live AgntID Runtime at `AGNTID_MCP_URL`, fails closed if unreachable), or `mock` (explicitly labelled offline simulation).
+- `AGNTID_MCP_URL`: AgntID Runtime MCP proxy endpoint (`http://localhost:8082/mcp`).
+- `AGNTID_ACCESS_TOKEN`: Optional raw OAuth token when required by the runtime (never include `Bearer ` or commit secrets).
+- `AGNTID_AGENT_ID` / `AGNTID_USER_ID`: Trusted task attribution identities.
+
+Expose AgentForge's workspace tools to a local AgntID runtime via:
+
+```bash
+agentforge workspace-mcp --routed --host 127.0.0.1 --port 8003
+```
+
+**Verification boundary & limitations:** All unit tests, `FastMCP` in-memory MCP proxy integration tests, and the 8-category experiment suite were verified locally using `agntid-sdk` v0.2.0 and `FakeAgntidMCPRuntime` (`mock_simulation`). Live end-to-end execution against a hosted/Docker `achr-runtime` instance requires AgntID Portal registration, a bootstrap token, and approved MCP server tools, and has not been live-verified in this environment.
+
+Routed MCP mode serves each run's disposable workspace using a temporary host-managed route. Follow the [live setup walkthrough](docs/HACKATHON_DEMO.md#3-register-and-run-the-live-demo) to register the tool server and verify decisions.
 
 For pinned public-repository tests, see [the repository benchmark](docs/REPOSITORY_BENCHMARK.md). It checks real upstream test suites and deliberately broken source in a restricted Docker container, then runs live local-model repairs in GitHub Actions.
 

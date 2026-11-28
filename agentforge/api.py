@@ -44,6 +44,7 @@ class RunRequest(BaseModel):
     use_beeai: bool = False
     max_repair_rounds: int | None = Field(default=None, ge=0, le=5)
     fast_mode: bool = False
+    agntid_mode: str | None = Field(default=None, pattern="^(off|mcp|mock)$")
 
 @app.get("/health")
 async def health() -> dict[str, str]:
@@ -63,7 +64,7 @@ def require_token(authorization: str | None = Header(default=None)) -> None:
 def configuration() -> dict:
     settings = Settings.from_env()
     return {"provider": settings.provider, "model": settings.model,
-            "validator": settings.validator}
+            "validator": settings.validator, "agntid_mode": settings.agntid_mode}
 
 
 def _run_job(job_id: str, payload: RunRequest) -> None:
@@ -74,7 +75,8 @@ def _run_job(job_id: str, payload: RunRequest) -> None:
             payload.request, use_crewai=payload.use_crewai, use_beeai=payload.use_beeai,
             max_repair_rounds=payload.max_repair_rounds, source_repo=payload.source_repo,
             test_manifest=payload.test_manifest, generate_tests=payload.generate_tests,
-            allow_local_execution=payload.allow_local_execution, fast_mode=payload.fast_mode))
+            allow_local_execution=payload.allow_local_execution, fast_mode=payload.fast_mode,
+            agntid_mode=payload.agntid_mode))
         with _job_lock:
             _jobs[job_id] = {"status": "completed", "report": report.model_dump(mode="json")}
     except Exception as exc:
@@ -106,7 +108,7 @@ def job_status(job_id: str) -> dict:
 @app.post("/runs", response_model=RunReport, dependencies=[Depends(require_token)])
 async def create_run(payload: RunRequest) -> RunReport:
     try:
-        return await AgentForgeEngine().run(payload.request, use_crewai=payload.use_crewai, use_beeai=payload.use_beeai, max_repair_rounds=payload.max_repair_rounds, source_repo=payload.source_repo, test_manifest=payload.test_manifest, generate_tests=payload.generate_tests, allow_local_execution=payload.allow_local_execution, fast_mode=payload.fast_mode)
+        return await AgentForgeEngine().run(payload.request, use_crewai=payload.use_crewai, use_beeai=payload.use_beeai, max_repair_rounds=payload.max_repair_rounds, source_repo=payload.source_repo, test_manifest=payload.test_manifest, generate_tests=payload.generate_tests, allow_local_execution=payload.allow_local_execution, fast_mode=payload.fast_mode, agntid_mode=payload.agntid_mode)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

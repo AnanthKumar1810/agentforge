@@ -36,6 +36,13 @@ class Settings:
     provider: str = "openai"
     ollama_base_url: str = "http://127.0.0.1:11434/v1/"
     validator: str = "docker"
+    agntid_mode: str = "off"
+    agntid_mcp_url: str = "http://localhost:8082/mcp"
+    agntid_agent_id: str = "agentforge-coding-agent:v1"
+    agntid_user_id: str = "local-operator"
+    agntid_timeout_seconds: float = 10.0
+    agntid_tool_prefix: str = ""
+    agntid_workspace_root: Path | None = None
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -53,6 +60,21 @@ class Settings:
         validator = os.getenv("AGENTFORGE_VALIDATOR", "docker").strip().lower()
         if validator not in {"local", "docker"}:
             raise ValueError("AGENTFORGE_VALIDATOR must be local or docker")
+        agntid_mode = os.getenv("AGENTFORGE_AGNTID_MODE", "off").strip().lower()
+        if agntid_mode not in {"off", "mcp", "mock"}:
+            raise ValueError("AGENTFORGE_AGNTID_MODE must be off, mcp, or mock")
+        agntid_mcp_url = os.getenv("AGNTID_MCP_URL", "http://localhost:8082/mcp").strip()
+        if agntid_mode == "mcp":
+            mcp_endpoint = urlsplit(agntid_mcp_url)
+            if mcp_endpoint.scheme not in {"http", "https"} or not mcp_endpoint.netloc or mcp_endpoint.username or mcp_endpoint.password:
+                raise ValueError("AGNTID_MCP_URL must be a valid http(s) URL without embedded credentials")
+        raw_agntid_timeout = os.getenv("AGENTFORGE_AGNTID_TIMEOUT_SECONDS", "10.0").strip()
+        try:
+            agntid_timeout = float(raw_agntid_timeout)
+        except ValueError as exc:
+            raise ValueError("AGENTFORGE_AGNTID_TIMEOUT_SECONDS must be a number") from exc
+        if agntid_timeout <= 0 or agntid_timeout > 120:
+            raise ValueError("AGENTFORGE_AGNTID_TIMEOUT_SECONDS must be between 0 and 120")
         return cls(
             model=model,
             data_dir=Path(os.getenv("AGENTFORGE_DATA_DIR", ".agentforge-data")).expanduser(),
@@ -65,6 +87,12 @@ class Settings:
             provider=provider,
             ollama_base_url=base_url,
             validator=validator,
+            agntid_mode=agntid_mode,
+            agntid_mcp_url=agntid_mcp_url,
+            agntid_agent_id=os.getenv("AGNTID_AGENT_ID", "agentforge-coding-agent:v1").strip() or "agentforge-coding-agent:v1",
+            agntid_user_id=os.getenv("AGNTID_USER_ID", "local-operator").strip() or "local-operator",
+            agntid_timeout_seconds=agntid_timeout,
+            agntid_tool_prefix=os.getenv("AGENTFORGE_AGNTID_TOOL_PREFIX", "").strip(),
         )
 
 
